@@ -1,0 +1,450 @@
+import 'package:flutter/material.dart';
+import '../../models/booking.dart';
+import '../../models/user_profile.dart';
+import '../../services/buddy_repository.dart';
+import '../../theme/app_theme.dart';
+import '../auth/google_auth_dialog.dart';
+import '../explore/buddy_detail_screen.dart';
+
+class MyBookingsScreen extends StatelessWidget {
+  final bool showAppBar;
+
+  const MyBookingsScreen({super.key, this.showAppBar = false});
+
+  static String _formatBookingDateTime(DateTime dt, int durationHours) {
+    final hour12 = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    final minuteStr = dt.minute.toString().padLeft(2, '0');
+    final dayStr = dt.day.toString().padLeft(2, '0');
+    final monthStr = dt.month.toString().padLeft(2, '0');
+    return '$dayStr/$monthStr/${dt.year} at $hour12:$minuteStr $period ($durationHours hrs)';
+  }
+
+  static Future<void> _openBuddyProfile(BuildContext context, Booking booking) async {
+    final repo = BuddyRepository.instance;
+    final buddy = await repo.getBuddyById(booking.buddyId);
+    if (!context.mounted) return;
+
+    if (buddy != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => BuddyDetailScreen(buddy: buddy),
+        ),
+      );
+    } else {
+      // If full buddy record is not present, construct profile from booking info
+      final fallbackBuddy = UserProfile(
+        id: booking.buddyId,
+        fullName: booking.buddyName,
+        email: '',
+        phoneNumber: '',
+        city: booking.city,
+        hourlyRate: booking.hourlyRate,
+        categories: [booking.activity],
+        bio: 'Local companion based in ${booking.city}.',
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => BuddyDetailScreen(buddy: fallbackBuddy),
+        ),
+      );
+    }
+  }
+
+  static Future<void> _confirmCancelBooking(BuildContext context, Booking booking) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel Booking?'),
+        content: Text(
+          'Are you sure you want to cancel your hangout session with ${booking.buddyName} on '
+          '${booking.dateTime.day}/${booking.dateTime.month}/${booking.dateTime.year}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep Booking'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Yes, Cancel Booking'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      await BuddyRepository.instance.updateBookingStatus(booking.id, BookingStatus.cancelled);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Booking has been cancelled.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final repo = BuddyRepository.instance;
+    final canPop = Navigator.of(context).canPop();
+    final shouldShowAppBar = showAppBar || canPop;
+
+    Widget content = ListenableBuilder(
+      listenable: repo,
+      builder: (context, child) {
+        if (!repo.isAuthenticated) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.lock_outline_rounded, size: 54, color: AppTheme.textMuted),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Sign In to View Your Bookings',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Access your scheduled hangout sessions, meeting points, and buddy contact details.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (context) => const GoogleAuthDialog(),
+                      );
+                    },
+                    child: const Text('Sign In with Google'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final bookings = repo.bookings;
+
+        if (bookings.isEmpty) {
+          return RefreshIndicator(
+            onRefresh: () => repo.loadRemoteBookings(),
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                SizedBox(height: MediaQuery.of(context).size.height * 0.25),
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.calendar_today_outlined, size: 54, color: AppTheme.textMuted),
+                        SizedBox(height: 16),
+                        Text('No Bookings Yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        SizedBox(height: 8),
+                        Text(
+                          'Browse verified buddies and request your first meetup!',
+                          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return RefreshIndicator(
+          onRefresh: () => repo.loadRemoteBookings(),
+          child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            itemCount: bookings.length,
+          itemBuilder: (context, index) {
+            final b = bookings[index];
+            return Container(
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppTheme.cardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        b.activity,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: b.status == BookingStatus.confirmed
+                              ? AppTheme.success.withOpacity(0.12)
+                              : (b.status == BookingStatus.pending
+                                  ? AppTheme.warning.withOpacity(0.12)
+                                  : Colors.red.withOpacity(0.12)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          b.status.name.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: b.status == BookingStatus.confirmed
+                                ? AppTheme.success
+                                : (b.status == BookingStatus.pending
+                                    ? AppTheme.warning
+                                    : Colors.red.shade700),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.person_pin_circle_outlined, size: 16, color: AppTheme.primary),
+                      const SizedBox(width: 4),
+                      if (repo.currentUser != null && repo.currentUser!.id == b.buddyId) ...[
+                        Text('Client: ${b.clientName} in ${b.city}', style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+                      ] else ...[
+                        const Text('With ', style: TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+                        InkWell(
+                          onTap: () => _openBuddyProfile(context, b),
+                          borderRadius: BorderRadius.circular(4),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  b.buddyName,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.primary,
+                                    decoration: TextDecoration.underline,
+                                    decorationColor: AppTheme.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 3),
+                                const Icon(Icons.open_in_new_rounded, size: 13, color: AppTheme.primary),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Text(' in ${b.city}', style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.access_time_rounded, size: 15, color: AppTheme.textMuted),
+                      const SizedBox(width: 5),
+                      Text(
+                        _formatBookingDateTime(b.dateTime, b.durationHours),
+                        style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.place_outlined, size: 15, color: AppTheme.textMuted),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          'Meeting Point: ${b.meetingLocation}',
+                          style: const TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (b.notes.trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 2),
+                          child: Icon(Icons.chat_bubble_outline_rounded, size: 14, color: AppTheme.textMuted),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppTheme.cardBorderSubtle),
+                            ),
+                            child: Text(
+                              'Additional Note: "${b.notes.trim()}"',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const Divider(height: 20, color: AppTheme.cardBorder),
+                  // If the current logged in user is the buddy and status is pending, show Confirm & Decline actions
+                  if (repo.currentUser != null && repo.currentUser!.id == b.buddyId && b.status == BookingStatus.pending) ...[
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFD97706)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${b.clientName} requested this session with you. Please confirm or decline based on your schedule.',
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF92400E), fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              await repo.updateBookingStatus(b.id, BookingStatus.confirmed);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Booking accepted! Slot confirmed.'),
+                                    backgroundColor: AppTheme.success,
+                                  ),
+                                );
+                              }
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.success,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                            ),
+                            icon: const Icon(Icons.check_rounded, size: 16),
+                            label: const Text('Confirm Availability', style: TextStyle(fontSize: 12.5)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              await repo.updateBookingStatus(b.id, BookingStatus.cancelled);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Booking declined.')),
+                                );
+                              }
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red.shade700,
+                              side: BorderSide(color: Colors.red.shade300),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                            ),
+                            icon: const Icon(Icons.close_rounded, size: 16),
+                            label: const Text('Decline Slot', style: TextStyle(fontSize: 12.5)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Total: ₹${b.totalAmount.toInt()}',
+                        style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: AppTheme.primary),
+                      ),
+                      Row(
+                        children: [
+                          if (b.status != BookingStatus.cancelled && b.status != BookingStatus.completed)
+                            TextButton.icon(
+                              onPressed: () => _confirmCancelBooking(context, b),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.red.shade700,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              icon: const Icon(Icons.cancel_outlined, size: 15),
+                              label: const Text('Cancel Booking', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            ),
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                            onPressed: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Contact support / SOS for help with this session.')),
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: const Text('Help & SOS', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      );
+    },
+  );
+
+  if (shouldShowAppBar) {
+    return Scaffold(
+      backgroundColor: AppTheme.bgLight,
+      appBar: AppBar(
+        title: const Text('Your Bookings & Hangouts'),
+        leading: canPop
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
+      ),
+      body: content,
+    );
+  }
+
+  return content;
+}
+}

@@ -271,7 +271,10 @@ class SupabaseService {
 
   /// Add buddy to user wishlist in Supabase
   Future<bool> addToWishlist(String userId, String buddyId) async {
-    if (!isConfigured) return false;
+    if (!isConfigured) {
+      debugPrint('[SupabaseService] Supabase not configured. Cannot add to wishlist.');
+      return false;
+    }
 
     try {
       final url = Uri.parse('${AppConfig.supabaseUrl}/rest/v1/wishlists');
@@ -284,7 +287,13 @@ class SupabaseService {
       headers['Prefer'] = 'resolution=merge-duplicates,return=representation';
 
       final response = await http.post(url, headers: headers, body: payload);
-      return response.statusCode >= 200 && response.statusCode < 300;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        debugPrint('[SupabaseService] Wishlist entry saved in Supabase for user: $userId, buddy: $buddyId');
+        return true;
+      } else {
+        debugPrint('[SupabaseService] Save wishlist failed (${response.statusCode}): ${response.body}');
+        return false;
+      }
     } catch (e) {
       debugPrint('[SupabaseService] Error adding to wishlist in Supabase: $e');
       return false;
@@ -293,14 +302,23 @@ class SupabaseService {
 
   /// Remove buddy from user wishlist in Supabase
   Future<bool> removeFromWishlist(String userId, String buddyId) async {
-    if (!isConfigured) return false;
+    if (!isConfigured) {
+      debugPrint('[SupabaseService] Supabase not configured. Cannot remove from wishlist.');
+      return false;
+    }
 
     try {
       final url = Uri.parse(
         '${AppConfig.supabaseUrl}/rest/v1/wishlists?user_id=eq.$userId&buddy_id=eq.$buddyId',
       );
       final response = await http.delete(url, headers: _headers);
-      return response.statusCode >= 200 && response.statusCode < 300;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        debugPrint('[SupabaseService] Wishlist entry removed from Supabase for user: $userId, buddy: $buddyId');
+        return true;
+      } else {
+        debugPrint('[SupabaseService] Remove wishlist failed (${response.statusCode}): ${response.body}');
+        return false;
+      }
     } catch (e) {
       debugPrint('[SupabaseService] Error removing from wishlist in Supabase: $e');
       return false;

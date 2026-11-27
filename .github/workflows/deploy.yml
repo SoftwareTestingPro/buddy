@@ -33,14 +33,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Create fallback .env if not present
+      - name: Inject .env from GitHub Secret
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
         run: |
-          if [ ! -f ".env" ]; then
-            if [ -f ".env.example" ]; then
-              cp .env.example .env
-            else
-              touch .env
-            fi
+          if [ -n "$ENV_FILE" ]; then
+            echo "$ENV_FILE" > .env
+          else
+            echo "Error: ENV_FILE secret is missing in GitHub repository settings!"
+            exit 1
           fi
 
       - name: Build Flutter Web

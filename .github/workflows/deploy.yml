@@ -46,13 +46,10 @@ jobs:
       - name: Build Flutter Web
         run: flutter build web --release --base-href "/" --no-wasm-dry-run
 
-      - name: Ensure CNAME is present in build output
+      - name: Disable Jekyll and configure CNAME
         run: |
-          if [ -f "CNAME" ]; then
-            cp CNAME build/web/CNAME
-          else
-            echo "buddy.futurelab.co.in" > build/web/CNAME
-          fi
+          touch build/web/.nojekyll
+          echo "buddy.futurelab.co.in" > build/web/CNAME
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

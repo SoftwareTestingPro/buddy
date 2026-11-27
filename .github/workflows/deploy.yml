@@ -33,8 +33,18 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Create fallback .env if not present
+        run: |
+          if [ ! -f ".env" ]; then
+            if [ -f ".env.example" ]; then
+              cp .env.example .env
+            else
+              touch .env
+            fi
+          fi
+
       - name: Build Flutter Web
-        run: flutter build web --release --base-href "/"
+        run: flutter build web --release --base-href "/" --no-wasm-dry-run
 
       - name: Ensure CNAME is present in build output
         run: |

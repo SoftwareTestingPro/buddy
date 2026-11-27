@@ -14,12 +14,19 @@ class BuddyRepository extends ChangeNotifier {
   final List<Booking> _bookings = [];
   final Set<String> _wishlistBuddyIds = {};
   bool _isLoading = false;
+  int _activeHomeTabIndex = 0;
 
   late final GoogleSignIn _googleSignIn;
 
   UserProfile? get currentUser => _currentUser;
   bool get isAuthenticated => _currentUser != null;
   bool get isLoading => _isLoading;
+  int get activeHomeTabIndex => _activeHomeTabIndex;
+
+  void setActiveHomeTab(int index) {
+    _activeHomeTabIndex = index;
+    notifyListeners();
+  }
   List<UserProfile> get buddies => List.unmodifiable(_buddies);
   List<Booking> get bookings => List.unmodifiable(_bookings);
   Set<String> get wishlistBuddyIds => Set.unmodifiable(_wishlistBuddyIds);
@@ -171,6 +178,13 @@ class BuddyRepository extends ChangeNotifier {
       // If remote returned records, synchronize them with local cache
       if (remoteData.isNotEmpty) {
         final remoteBookings = remoteData.map((row) {
+          final rawDateTimeStr = row['date_time']?.toString() ?? '';
+          DateTime parsedDateTime = DateTime.tryParse(rawDateTimeStr) ?? DateTime.now();
+          // Ensure timestamp is converted from UTC to local IST
+          if (parsedDateTime.isUtc) {
+            parsedDateTime = parsedDateTime.toLocal();
+          }
+
           return Booking(
             id: row['id']?.toString() ?? '',
             clientId: row['client_id']?.toString() ?? '',
@@ -179,7 +193,7 @@ class BuddyRepository extends ChangeNotifier {
             buddyName: row['buddy_name']?.toString() ?? 'Buddy',
             activity: row['activity'] ?? 'Hangout',
             city: row['city'] ?? '',
-            dateTime: DateTime.tryParse(row['date_time']?.toString() ?? '') ?? DateTime.now(),
+            dateTime: parsedDateTime,
             durationHours: (row['duration_hours'] as num?)?.toInt() ?? 2,
             hourlyRate: (row['hourly_rate'] as num?)?.toDouble() ?? 0.0,
             totalAmount: (row['total_amount'] as num?)?.toDouble() ?? 0.0,

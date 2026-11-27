@@ -102,6 +102,7 @@ class _BookingModalState extends State<BookingModal> {
     if (!_formKey.currentState!.validate()) return;
 
     final now = DateTime.now();
+    // Construct local IST DateTime
     final bookingDateTime = DateTime(
       _selectedDate.year,
       _selectedDate.month,

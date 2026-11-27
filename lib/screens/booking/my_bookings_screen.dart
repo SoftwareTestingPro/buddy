@@ -12,12 +12,14 @@ class MyBookingsScreen extends StatelessWidget {
   const MyBookingsScreen({super.key, this.showAppBar = false});
 
   static String _formatBookingDateTime(DateTime dt, int durationHours) {
-    final hour12 = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
-    final period = dt.hour >= 12 ? 'PM' : 'AM';
-    final minuteStr = dt.minute.toString().padLeft(2, '0');
-    final dayStr = dt.day.toString().padLeft(2, '0');
-    final monthStr = dt.month.toString().padLeft(2, '0');
-    return '$dayStr/$monthStr/${dt.year} at $hour12:$minuteStr $period ($durationHours hrs)';
+    // Explicitly convert UTC or server timestamps to Indian Standard Time (IST, UTC+5:30)
+    final istDt = dt.isUtc ? dt.add(const Duration(hours: 5, minutes: 30)) : dt.toLocal();
+    final hour12 = istDt.hour == 0 ? 12 : (istDt.hour > 12 ? istDt.hour - 12 : istDt.hour);
+    final period = istDt.hour >= 12 ? 'PM' : 'AM';
+    final minuteStr = istDt.minute.toString().padLeft(2, '0');
+    final dayStr = istDt.day.toString().padLeft(2, '0');
+    final monthStr = istDt.month.toString().padLeft(2, '0');
+    return '$dayStr/$monthStr/${istDt.year} at $hour12:$minuteStr $period IST ($durationHours hrs)';
   }
 
   static Future<void> _openBuddyProfile(BuildContext context, Booking booking) async {

@@ -55,7 +55,10 @@ class WishlistScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 24),
                     ElevatedButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () {
+                        repo.setActiveHomeTab(0);
+                        Navigator.of(context).pop();
+                      },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primary,
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),

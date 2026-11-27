@@ -378,8 +378,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final repo = BuddyRepository.instance;
 
-    return Scaffold(
-      backgroundColor: AppTheme.bgLight,
+    return ListenableBuilder(
+      listenable: repo,
+      builder: (context, _) {
+        if (repo.activeHomeTabIndex != _currentTab) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() => _currentTab = repo.activeHomeTabIndex);
+              _scrollToTopOfTab(repo.activeHomeTabIndex);
+            }
+          });
+        }
+
+        return Scaffold(
+          backgroundColor: AppTheme.bgLight,
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(68),
         child: Container(
@@ -494,6 +506,8 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+        );
+      },
     );
   }
 

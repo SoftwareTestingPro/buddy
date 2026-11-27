@@ -243,4 +243,67 @@ class SupabaseService {
     }
     return false;
   }
+
+  /// Fetch user wishlist buddy IDs from Supabase
+  Future<List<String>> fetchUserWishlist(String userId) async {
+    if (!isConfigured) return [];
+
+    try {
+      final url = Uri.parse(
+        '${AppConfig.supabaseUrl}/rest/v1/wishlists?user_id=eq.$userId&select=buddy_id',
+      );
+      final response = await http.get(url, headers: _headers);
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data
+            .map((item) => item['buddy_id']?.toString() ?? '')
+            .where((id) => id.isNotEmpty)
+            .toList();
+      } else {
+        debugPrint('[SupabaseService] fetchUserWishlist failed (${response.statusCode}): ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] Error in fetchUserWishlist: $e');
+    }
+    return [];
+  }
+
+  /// Add buddy to user wishlist in Supabase
+  Future<bool> addToWishlist(String userId, String buddyId) async {
+    if (!isConfigured) return false;
+
+    try {
+      final url = Uri.parse('${AppConfig.supabaseUrl}/rest/v1/wishlists');
+      final payload = jsonEncode({
+        'user_id': userId,
+        'buddy_id': buddyId,
+      });
+
+      final headers = Map<String, String>.from(_headers);
+      headers['Prefer'] = 'resolution=merge-duplicates,return=representation';
+
+      final response = await http.post(url, headers: headers, body: payload);
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (e) {
+      debugPrint('[SupabaseService] Error adding to wishlist in Supabase: $e');
+      return false;
+    }
+  }
+
+  /// Remove buddy from user wishlist in Supabase
+  Future<bool> removeFromWishlist(String userId, String buddyId) async {
+    if (!isConfigured) return false;
+
+    try {
+      final url = Uri.parse(
+        '${AppConfig.supabaseUrl}/rest/v1/wishlists?user_id=eq.$userId&buddy_id=eq.$buddyId',
+      );
+      final response = await http.delete(url, headers: _headers);
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (e) {
+      debugPrint('[SupabaseService] Error removing from wishlist in Supabase: $e');
+      return false;
+    }
+  }
 }

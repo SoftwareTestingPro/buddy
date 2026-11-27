@@ -13,8 +13,10 @@ class BuddyCard extends StatelessWidget {
   final double hourlyRate;
   final bool isVerified;
   final List<String> categories;
+  final bool isWishlisted;
   final VoidCallback onTap;
   final VoidCallback onBook;
+  final VoidCallback? onToggleWishlist;
 
   const BuddyCard({
     super.key,
@@ -28,8 +30,10 @@ class BuddyCard extends StatelessWidget {
     required this.hourlyRate,
     required this.isVerified,
     required this.categories,
+    this.isWishlisted = false,
     required this.onTap,
     required this.onBook,
+    this.onToggleWishlist,
   });
 
   @override
@@ -136,42 +140,19 @@ class BuddyCard extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              // Rating badge
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: reviews > 0 ? const Color(0xFFFEF3C7) : const Color(0xFFF1F5F9),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.star_rounded,
-                                      size: 16,
-                                      color: reviews > 0 ? const Color(0xFFD97706) : Colors.grey.shade400,
+                              if (onToggleWishlist != null)
+                                InkWell(
+                                  onTap: onToggleWishlist,
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: Icon(
+                                      isWishlisted ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                                      size: 22,
+                                      color: isWishlisted ? const Color(0xFFEF4444) : const Color(0xFF94A3B8),
                                     ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      reviews > 0 ? rating.toStringAsFixed(1) : 'New',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        fontSize: 13,
-                                        color: reviews > 0 ? const Color(0xFF92400E) : Colors.grey.shade700,
-                                      ),
-                                    ),
-                                    if (reviews > 0)
-                                      Text(
-                                        ' ($reviews)',
-                                        style: const TextStyle(
-                                          fontSize: 11.5,
-                                          color: Color(0xFFB45309),
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                  ],
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
                           const SizedBox(height: 5),
@@ -302,16 +283,45 @@ class BuddyCard extends StatelessWidget {
                     ),
                     Row(
                       children: [
-                        OutlinedButton(
-                          onPressed: onTap,
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            side: const BorderSide(color: AppTheme.cardBorder, width: 1.2),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        // Rating & Reviews moved here
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: reviews > 0 ? const Color(0xFFFEF3C7) : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: reviews > 0 ? const Color(0xFFFDE68A) : const Color(0xFFE2E8F0),
+                              width: 1,
+                            ),
                           ),
-                          child: const Text('View Story', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.star_rounded,
+                                size: 16,
+                                color: reviews > 0 ? const Color(0xFFD97706) : Colors.grey.shade400,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                reviews > 0 ? rating.toStringAsFixed(1) : 'New',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
+                                  color: reviews > 0 ? const Color(0xFF92400E) : Colors.grey.shade700,
+                                ),
+                              ),
+                              if (reviews > 0)
+                                Text(
+                                  ' ($reviews)',
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: Color(0xFFB45309),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                         const SizedBox(width: 10),
                         Container(

@@ -29,9 +29,43 @@ class _HomeScreenState extends State<HomeScreen> {
   double? _maxPrice;
   final TextEditingController _searchController = TextEditingController();
 
+  final ScrollController _exploreScrollController = ScrollController();
+  final ScrollController _earningsScrollController = ScrollController();
+  final ScrollController _plansScrollController = ScrollController();
+  final ScrollController _profileScrollController = ScrollController();
+
+  ScrollController _getScrollControllerForTab(int tabIndex) {
+    switch (tabIndex) {
+      case 0:
+        return _exploreScrollController;
+      case 1:
+        return _earningsScrollController;
+      case 2:
+        return _plansScrollController;
+      case 3:
+      default:
+        return _profileScrollController;
+    }
+  }
+
+  void _scrollToTopOfTab(int tabIndex) {
+    final controller = _getScrollControllerForTab(tabIndex);
+    if (controller.hasClients) {
+      controller.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
+    _exploreScrollController.dispose();
+    _earningsScrollController.dispose();
+    _plansScrollController.dispose();
+    _profileScrollController.dispose();
     super.dispose();
   }
 
@@ -429,9 +463,9 @@ class _HomeScreenState extends State<HomeScreen> {
         index: _currentTab,
         children: [
           _buildExploreTab(repo),
-          const EarningsCalculatorScreen(),
-          const MembershipPlansScreen(),
-          const ProfileTabScreen(),
+          EarningsCalculatorScreen(scrollController: _earningsScrollController),
+          MembershipPlansScreen(scrollController: _plansScrollController),
+          ProfileTabScreen(scrollController: _profileScrollController),
         ],
       ),
       // Modern Floating Glass Navigation Bar
@@ -467,7 +501,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final isSelected = _currentTab == index;
     return InkWell(
       onTap: () {
-        setState(() => _currentTab = index);
+        if (_currentTab == index) {
+          // If already on the tab, tapping scrolls to top smoothly
+          _scrollToTopOfTab(index);
+        } else {
+          setState(() => _currentTab = index);
+          // When switching tabs, ensure the target tab starts at the top
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _scrollToTopOfTab(index);
+          });
+        }
         if (index == 3) {
           BuddyRepository.instance.loadRemoteBookings();
         }
@@ -518,6 +561,7 @@ class _HomeScreenState extends State<HomeScreen> {
         );
 
         return SingleChildScrollView(
+          controller: _exploreScrollController,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           child: Center(
             child: ConstrainedBox(
@@ -1065,6 +1109,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     )
                   else
                     ...filteredBuddies.map((buddy) {
+                      final isWish = repo.isWishlisted(buddy.id);
                       return BuddyCard(
                         name: buddy.fullName,
                         city: buddy.city,
@@ -1076,6 +1121,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         hourlyRate: buddy.hourlyRate,
                         isVerified: buddy.isVerified,
                         categories: buddy.categories,
+                        isWishlisted: isWish,
+                        onToggleWishlist: () {
+                          repo.toggleWishlist(buddy.id);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                !isWish
+                                    ? '${buddy.fullName} added to your Wishlist!'
+                                    : '${buddy.fullName} removed from your Wishlist.',
+                              ),
+                              duration: const Duration(seconds: 2),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
                         onTap: () => _openBuddyDetail(buddy),
                         onBook: () => _openBookingDirect(buddy),
                       );

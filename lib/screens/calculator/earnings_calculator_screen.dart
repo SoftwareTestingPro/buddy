@@ -5,7 +5,9 @@ import '../auth/google_auth_dialog.dart';
 import '../auth/profile_setup_screen.dart';
 
 class EarningsCalculatorScreen extends StatefulWidget {
-  const EarningsCalculatorScreen({super.key});
+  final ScrollController? scrollController;
+
+  const EarningsCalculatorScreen({super.key, this.scrollController});
 
   @override
   State<EarningsCalculatorScreen> createState() => _EarningsCalculatorScreenState();
@@ -22,6 +24,7 @@ class _EarningsCalculatorScreenState extends State<EarningsCalculatorScreen> {
     return Scaffold(
       backgroundColor: AppTheme.bgLight,
       body: SingleChildScrollView(
+        controller: widget.scrollController,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
         child: Center(
           child: ConstrainedBox(

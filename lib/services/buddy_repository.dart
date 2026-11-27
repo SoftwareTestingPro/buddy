@@ -12,6 +12,7 @@ class BuddyRepository extends ChangeNotifier {
   UserProfile? _currentUser;
   final List<UserProfile> _buddies = [];
   final List<Booking> _bookings = [];
+  final Set<String> _wishlistBuddyIds = {};
   bool _isLoading = false;
 
   late final GoogleSignIn _googleSignIn;
@@ -21,6 +22,11 @@ class BuddyRepository extends ChangeNotifier {
   bool get isLoading => _isLoading;
   List<UserProfile> get buddies => List.unmodifiable(_buddies);
   List<Booking> get bookings => List.unmodifiable(_bookings);
+  Set<String> get wishlistBuddyIds => Set.unmodifiable(_wishlistBuddyIds);
+  List<UserProfile> get wishlistedBuddies =>
+      _buddies.where((b) => _wishlistBuddyIds.contains(b.id)).toList();
+
+  bool isWishlisted(String buddyId) => _wishlistBuddyIds.contains(buddyId);
 
   static final BuddyRepository instance = BuddyRepository._internal();
   BuddyRepository._internal() {
@@ -123,9 +129,14 @@ class BuddyRepository extends ChangeNotifier {
       }
     }
 
-    // Refresh bookings from Supabase if user exists
+    // Load cached wishlist
+    final wishlist = prefs.getStringList('cached_wishlist') ?? [];
+    _wishlistBuddyIds.addAll(wishlist);
+
+    // Refresh bookings & wishlist from Supabase if user exists
     if (_currentUser != null) {
       loadRemoteBookings();
+      loadRemoteWishlist();
     }
 
     _setLoading(false);
@@ -156,34 +167,43 @@ class BuddyRepository extends ChangeNotifier {
     if (_currentUser == null) return;
     try {
       final remoteData = await SupabaseService.instance.fetchUserBookings(_currentUser!.id);
-      // Synchronize exact bookings from Supabase (handles deletions and updates)
-      final remoteBookings = remoteData.map((row) {
-        return Booking(
-          id: row['id']?.toString() ?? '',
-          clientId: row['client_id']?.toString() ?? '',
-          clientName: row['client_name']?.toString() ?? 'Client',
-          buddyId: row['buddy_id']?.toString() ?? '',
-          buddyName: row['buddy_name']?.toString() ?? 'Buddy',
-          activity: row['activity'] ?? 'Hangout',
-          city: row['city'] ?? '',
-          dateTime: DateTime.tryParse(row['date_time']?.toString() ?? '') ?? DateTime.now(),
-          durationHours: (row['duration_hours'] as num?)?.toInt() ?? 2,
-          hourlyRate: (row['hourly_rate'] as num?)?.toDouble() ?? 0.0,
-          totalAmount: (row['total_amount'] as num?)?.toDouble() ?? 0.0,
-          meetingLocation: row['meeting_location'] ?? '',
-          notes: row['notes'] ?? '',
-          status: BookingStatus.values.firstWhere(
-            (e) => e.name == row['status'],
-            orElse: () => BookingStatus.pending,
-          ),
-        );
-      }).toList();
+      
+      // If remote returned records, synchronize them with local cache
+      if (remoteData.isNotEmpty) {
+        final remoteBookings = remoteData.map((row) {
+          return Booking(
+            id: row['id']?.toString() ?? '',
+            clientId: row['client_id']?.toString() ?? '',
+            clientName: row['client_name']?.toString() ?? 'Client',
+            buddyId: row['buddy_id']?.toString() ?? '',
+            buddyName: row['buddy_name']?.toString() ?? 'Buddy',
+            activity: row['activity'] ?? 'Hangout',
+            city: row['city'] ?? '',
+            dateTime: DateTime.tryParse(row['date_time']?.toString() ?? '') ?? DateTime.now(),
+            durationHours: (row['duration_hours'] as num?)?.toInt() ?? 2,
+            hourlyRate: (row['hourly_rate'] as num?)?.toDouble() ?? 0.0,
+            totalAmount: (row['total_amount'] as num?)?.toDouble() ?? 0.0,
+            meetingLocation: row['meeting_location'] ?? '',
+            notes: row['notes'] ?? '',
+            status: BookingStatus.values.firstWhere(
+              (e) => e.name == row['status'],
+              orElse: () => BookingStatus.pending,
+            ),
+          );
+        }).toList();
 
-      // Replace current bookings with live remote bookings from Supabase
-      _bookings.clear();
-      _bookings.addAll(remoteBookings);
-      await _saveBookings();
-      notifyListeners();
+        // Merge remote bookings with existing bookings so newly created local bookings aren't lost
+        for (final rb in remoteBookings) {
+          final idx = _bookings.indexWhere((b) => b.id == rb.id);
+          if (idx >= 0) {
+            _bookings[idx] = rb;
+          } else {
+            _bookings.add(rb);
+          }
+        }
+        await _saveBookings();
+        notifyListeners();
+      }
     } catch (e) {
       debugPrint('Error loading remote bookings: $e');
     }
@@ -192,6 +212,49 @@ class BuddyRepository extends ChangeNotifier {
   void _setLoading(bool value) {
     _isLoading = value;
     notifyListeners();
+  }
+
+  /// Fetch user wishlist from Supabase and synchronize with local state
+  Future<void> loadRemoteWishlist() async {
+    if (_currentUser == null) return;
+    try {
+      final remoteWishlist = await SupabaseService.instance.fetchUserWishlist(_currentUser!.id);
+      if (remoteWishlist.isNotEmpty) {
+        _wishlistBuddyIds.addAll(remoteWishlist);
+        await _saveWishlist();
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error loading remote wishlist: $e');
+    }
+  }
+
+  /// Toggle wishlist state for a companion
+  Future<bool> toggleWishlist(String buddyId) async {
+    final willBeWishlisted = !_wishlistBuddyIds.contains(buddyId);
+    if (willBeWishlisted) {
+      _wishlistBuddyIds.add(buddyId);
+    } else {
+      _wishlistBuddyIds.remove(buddyId);
+    }
+    await _saveWishlist();
+    notifyListeners();
+
+    // Persist to Supabase if logged in
+    if (_currentUser != null) {
+      if (willBeWishlisted) {
+        await SupabaseService.instance.addToWishlist(_currentUser!.id, buddyId);
+      } else {
+        await SupabaseService.instance.removeFromWishlist(_currentUser!.id, buddyId);
+      }
+    }
+
+    return willBeWishlisted;
+  }
+
+  Future<void> _saveWishlist() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('cached_wishlist', _wishlistBuddyIds.toList());
   }
 
   /// Subscribe to a plan
@@ -264,9 +327,10 @@ class BuddyRepository extends ChangeNotifier {
       }
 
       await _saveUserSession();
-      // Ensure the latest buddies and bookings from Supabase are refreshed upon login
+      // Ensure the latest buddies, bookings, and wishlist from Supabase are refreshed upon login
       await loadRemoteBuddies();
       await loadRemoteBookings();
+      await loadRemoteWishlist();
       _setLoading(false);
       notifyListeners();
       return _currentUser;
@@ -306,6 +370,7 @@ class BuddyRepository extends ChangeNotifier {
     );
 
     await _saveUserSession();
+    await loadRemoteWishlist();
     _setLoading(false);
     return _currentUser!;
   }
@@ -387,7 +452,7 @@ class BuddyRepository extends ChangeNotifier {
 
     // Persist to Supabase database if configured
     if (_currentUser != null) {
-      SupabaseService.instance.saveBooking({
+      await SupabaseService.instance.saveBooking({
         'id': booking.id,
         'client_id': booking.clientId,
         'client_name': booking.clientName,
@@ -493,6 +558,8 @@ class BuddyRepository extends ChangeNotifier {
     _currentUser = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('cached_user_profile');
+    _wishlistBuddyIds.clear();
+    await prefs.remove('cached_wishlist');
     notifyListeners();
   }
 
@@ -516,6 +583,8 @@ class BuddyRepository extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('cached_user_profile');
     await prefs.remove('cached_bookings');
+    _wishlistBuddyIds.clear();
+    await prefs.remove('cached_wishlist');
     notifyListeners();
   }
 

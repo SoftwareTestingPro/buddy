@@ -6,8 +6,9 @@ import '../auth/google_auth_dialog.dart';
 
 class MembershipPlansScreen extends StatelessWidget {
   final bool showAppBar;
+  final ScrollController? scrollController;
 
-  const MembershipPlansScreen({super.key, this.showAppBar = false});
+  const MembershipPlansScreen({super.key, this.showAppBar = false, this.scrollController});
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +35,7 @@ class MembershipPlansScreen extends StatelessWidget {
                 )
               : null,
           body: SingleChildScrollView(
+            controller: scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
             child: Center(
               child: ConstrainedBox(

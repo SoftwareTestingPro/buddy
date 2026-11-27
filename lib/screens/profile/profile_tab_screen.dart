@@ -8,9 +8,12 @@ import 'become_a_buddy_screen.dart';
 import 'account_settings_screen.dart';
 import '../booking/my_bookings_screen.dart';
 import '../plans/membership_plans_screen.dart';
+import 'wishlist_screen.dart';
 
 class ProfileTabScreen extends StatelessWidget {
-  const ProfileTabScreen({super.key});
+  final ScrollController? scrollController;
+
+  const ProfileTabScreen({super.key, this.scrollController});
 
   void _showPolicyModal(BuildContext context, {required String title, required String content}) {
     showDialog(
@@ -146,6 +149,7 @@ class ProfileTabScreen extends StatelessWidget {
         return Scaffold(
           backgroundColor: const Color(0xFFF8FAFC),
           body: SingleChildScrollView(
+            controller: scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
             child: Center(
               child: ConstrainedBox(
@@ -351,9 +355,14 @@ class ProfileTabScreen extends StatelessWidget {
                           icon: Icons.favorite_border_rounded,
                           iconColor: const Color(0xFFEC4899),
                           title: 'Your Wishlist & Saved Buddies',
+                          subtitle: repo.wishlistBuddyIds.isNotEmpty
+                              ? '${repo.wishlistBuddyIds.length} saved buddies'
+                              : 'Save buddies for quick access',
                           onTap: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Wishlist: You can save your favorite buddies during exploration.')),
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => const WishlistScreen(),
+                              ),
                             );
                           },
                         ),

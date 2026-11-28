@@ -54,9 +54,11 @@ class _MeetupSessionTimerCardState extends State<MeetupSessionTimerCard> {
   Future<void> _showEndPinEntryDialog(BuildContext context) async {
     final pinController = TextEditingController();
     String? errorMessage;
+    bool isSubmitting = false;
 
     await showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setState) {
@@ -84,6 +86,7 @@ class _MeetupSessionTimerCardState extends State<MeetupSessionTimerCard> {
                     maxLength: 4,
                     textAlign: TextAlign.center,
                     autofocus: true,
+                    enabled: !isSubmitting,
                     style: const TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.bold,
@@ -111,44 +114,60 @@ class _MeetupSessionTimerCardState extends State<MeetupSessionTimerCard> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
+                  onPressed: isSubmitting ? null : () => Navigator.of(ctx).pop(),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    final entered = pinController.text.trim();
-                    if (entered.length < 4) {
-                      setState(() => errorMessage = 'Please enter all 4 digits');
-                      return;
-                    }
+                  onPressed: isSubmitting
+                      ? null
+                      : () async {
+                          final entered = pinController.text.trim();
+                          if (entered.length < 4) {
+                            setState(() => errorMessage = 'Please enter all 4 digits');
+                            return;
+                          }
 
-                    final success = await BuddyRepository.instance.verifyAndEndMeetup(
-                      widget.booking.id,
-                      entered,
-                    );
+                          setState(() {
+                            isSubmitting = true;
+                            errorMessage = null;
+                          });
 
-                    if (success) {
-                      if (context.mounted) {
-                        Navigator.of(ctx).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Meetup concluded successfully! Session marked completed.'),
-                            backgroundColor: AppTheme.success,
-                          ),
-                        );
-                        // Prompt Buddy to submit star rating & review
-                        ReviewSubmissionDialog.show(context, widget.booking);
-                      }
-                    } else {
-                      setState(() => errorMessage = 'Invalid End PIN. Please check with client.');
-                    }
-                  },
+                          final success = await BuddyRepository.instance.verifyAndEndMeetup(
+                            widget.booking.id,
+                            entered,
+                          );
+
+                          if (ctx.mounted) {
+                            if (success) {
+                              Navigator.of(ctx).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Meetup concluded successfully! Session marked completed.'),
+                                  backgroundColor: AppTheme.success,
+                                ),
+                              );
+                              // Prompt Buddy to submit star rating & review
+                              ReviewSubmissionDialog.show(context, widget.booking);
+                            } else {
+                              setState(() {
+                                isSubmitting = false;
+                                errorMessage = 'Invalid End PIN. Please check with client.';
+                              });
+                            }
+                          }
+                        },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.success,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text('Verify & Conclude'),
+                  child: isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Verify & Conclude'),
                 ),
               ],
             );

@@ -87,9 +87,11 @@ class MyBookingsScreen extends StatelessWidget {
   static Future<void> _showStartPinVerificationDialog(BuildContext context, Booking booking) async {
     final pinController = TextEditingController();
     String? errorMessage;
+    bool isSubmitting = false;
 
     await showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setState) {
@@ -117,6 +119,7 @@ class MyBookingsScreen extends StatelessWidget {
                     maxLength: 4,
                     textAlign: TextAlign.center,
                     autofocus: true,
+                    enabled: !isSubmitting,
                     style: const TextStyle(
                       fontSize: 26,
                       fontWeight: FontWeight.bold,
@@ -144,34 +147,55 @@ class MyBookingsScreen extends StatelessWidget {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
+                  onPressed: isSubmitting ? null : () => Navigator.of(ctx).pop(),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    final entered = pinController.text.trim();
-                    if (entered.length < 4) {
-                      setState(() => errorMessage = 'Please enter all 4 digits');
-                      return;
-                    }
+                  onPressed: isSubmitting
+                      ? null
+                      : () async {
+                          final entered = pinController.text.trim();
+                          if (entered.length < 4) {
+                            setState(() => errorMessage = 'Please enter all 4 digits');
+                            return;
+                          }
 
-                    final success = await BuddyRepository.instance.verifyAndStartMeetup(booking.id, entered);
-                    if (success) {
-                      if (context.mounted) {
-                        Navigator.of(ctx).pop();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Meetup verified! Timer started for ${booking.durationHours} hours.'),
-                            backgroundColor: AppTheme.success,
-                          ),
-                        );
-                      }
-                    } else {
-                      setState(() => errorMessage = 'Incorrect PIN. Please re-check with client.');
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
-                  child: const Text('Verify & Start'),
+                          setState(() {
+                            isSubmitting = true;
+                            errorMessage = null;
+                          });
+
+                          final success = await BuddyRepository.instance.verifyAndStartMeetup(booking.id, entered);
+
+                          if (ctx.mounted) {
+                            if (success) {
+                              Navigator.of(ctx).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Meetup verified! Timer started for ${booking.durationHours} hours.'),
+                                  backgroundColor: AppTheme.success,
+                                ),
+                              );
+                            } else {
+                              setState(() {
+                                isSubmitting = false;
+                                errorMessage = 'Incorrect PIN. Please re-check with client.';
+                              });
+                            }
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('Verify & Start'),
                 ),
               ],
             );
@@ -625,9 +649,9 @@ class MyBookingsScreen extends StatelessWidget {
                     Row(
                       children: [
                         Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () async {
-                              await repo.updateBookingStatus(b.id, BookingStatus.confirmed);
+                          child: _ConfirmAvailabilityButton(
+                            bookingId: b.id,
+                            onConfirmed: () {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
@@ -637,37 +661,19 @@ class MyBookingsScreen extends StatelessWidget {
                                 );
                               }
                             },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.success,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                            ),
-                            icon: const Icon(Icons.check_rounded, size: 16),
-                            label: const Text('Confirm Availability', style: TextStyle(fontSize: 12.5)),
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () async {
-                              await repo.updateBookingStatus(
-                                b.id,
-                                BookingStatus.cancelled,
-                                cancelledByUserId: repo.currentUser?.id,
-                              );
+                          child: _DeclineSlotButton(
+                            bookingId: b.id,
+                            onDeclined: () {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text('Booking declined.')),
                                 );
                               }
                             },
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.red.shade700,
-                              side: BorderSide(color: Colors.red.shade300),
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                            ),
-                            icon: const Icon(Icons.close_rounded, size: 16),
-                            label: const Text('Decline Slot', style: TextStyle(fontSize: 12.5)),
                           ),
                         ),
                       ],
@@ -775,4 +781,97 @@ class MyBookingsScreen extends StatelessWidget {
 
   return content;
 }
+}
+
+class _ConfirmAvailabilityButton extends StatefulWidget {
+  final String bookingId;
+  final VoidCallback onConfirmed;
+
+  const _ConfirmAvailabilityButton({
+    required this.bookingId,
+    required this.onConfirmed,
+  });
+
+  @override
+  State<_ConfirmAvailabilityButton> createState() => _ConfirmAvailabilityButtonState();
+}
+
+class _ConfirmAvailabilityButtonState extends State<_ConfirmAvailabilityButton> {
+  bool _isLoading = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      onPressed: _isLoading
+          ? null
+          : () async {
+              setState(() => _isLoading = true);
+              await BuddyRepository.instance.updateBookingStatus(
+                widget.bookingId,
+                BookingStatus.confirmed,
+              );
+              widget.onConfirmed();
+            },
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppTheme.success,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+      ),
+      icon: _isLoading
+          ? const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
+          : const Icon(Icons.check_rounded, size: 16),
+      label: const Text('Confirm Availability', style: TextStyle(fontSize: 12.5)),
+    );
+  }
+}
+
+class _DeclineSlotButton extends StatefulWidget {
+  final String bookingId;
+  final VoidCallback onDeclined;
+
+  const _DeclineSlotButton({
+    required this.bookingId,
+    required this.onDeclined,
+  });
+
+  @override
+  State<_DeclineSlotButton> createState() => _DeclineSlotButtonState();
+}
+
+class _DeclineSlotButtonState extends State<_DeclineSlotButton> {
+  bool _isLoading = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: _isLoading
+          ? null
+          : () async {
+              setState(() => _isLoading = true);
+              await BuddyRepository.instance.updateBookingStatus(
+                widget.bookingId,
+                BookingStatus.cancelled,
+                cancelledByUserId: BuddyRepository.instance.currentUser?.id,
+              );
+              widget.onDeclined();
+            },
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.red.shade700,
+        side: BorderSide(color: Colors.red.shade300),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+      ),
+      icon: _isLoading
+          ? SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.red.shade700),
+            )
+          : const Icon(Icons.close_rounded, size: 16),
+      label: const Text('Decline Slot', style: TextStyle(fontSize: 12.5)),
+    );
+  }
 }

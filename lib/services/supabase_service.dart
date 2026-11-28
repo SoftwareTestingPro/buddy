@@ -271,7 +271,7 @@ class SupabaseService {
       final url = Uri.parse('${AppConfig.supabaseUrl}/rest/v1/notifications');
       final payload = jsonEncode(notificationData);
       final headers = Map<String, String>.from(_headers);
-      headers['Prefer'] = 'resolution=ignore-duplicates,return=minimal';
+      headers['Prefer'] = 'resolution=ignore-duplicates,return=representation';
 
       final response = await http.post(url, headers: headers, body: payload);
       if (response.statusCode >= 200 && response.statusCode < 300) {

@@ -99,6 +99,7 @@ class _BookingModalState extends State<BookingModal> {
   }
 
   Future<void> _confirmBooking() async {
+    if (_isSubmitting) return;
     if (!_formKey.currentState!.validate()) return;
 
     final now = DateTime.now();

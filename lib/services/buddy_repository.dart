@@ -890,10 +890,30 @@ class BuddyRepository extends ChangeNotifier {
     );
 
     _reviews.insert(0, review);
+
+    // Compute updated average rating and total reviews for target user
+    final targetReviews = getReviewsForUser(targetUserId);
+    final totalCount = targetReviews.length;
+    final avgRating = targetReviews.map((r) => r.rating).reduce((a, b) => a + b) / totalCount;
+
+    // Update in-memory buddy list if present
+    final bIdx = _buddies.indexWhere((b) => b.id == targetUserId);
+    if (bIdx >= 0) {
+      _buddies[bIdx] = _buddies[bIdx].copyWith(
+        rating: avgRating,
+        totalReviews: totalCount,
+      );
+    }
+
     notifyListeners();
 
     // Persist to Supabase
     await SupabaseService.instance.submitReview(review.toJson());
+    await SupabaseService.instance.updateProfileStats(
+      targetUserId,
+      rating: avgRating,
+      totalReviews: totalCount,
+    );
 
     // Send in-app notification to the target user informing them of the new review
     await NotificationService.instance.send(
@@ -908,6 +928,40 @@ class BuddyRepository extends ChangeNotifier {
     );
 
     return true;
+  }
+
+  /// Get actual completed meetup sessions count for a user (either as buddy or client)
+  int getCompletedSessionsCount(String userId) {
+    // 1. Calculate from local live bookings list
+    final liveCount = _bookings.where((b) =>
+        (b.buddyId == userId || b.clientId == userId) &&
+        b.status == BookingStatus.completed).length;
+
+    // 2. Combine with buddy base completedBookings if available
+    final buddy = _buddies.where((b) => b.id == userId).firstOrNull;
+    final baseCount = buddy?.completedBookings ?? 0;
+
+    return liveCount > baseCount ? liveCount : baseCount;
+  }
+
+  /// Get live average rating for a user based on all submitted reviews
+  double getRatingForUser(String userId) {
+    final userReviews = getReviewsForUser(userId);
+    if (userReviews.isNotEmpty) {
+      return userReviews.map((r) => r.rating).reduce((a, b) => a + b) / userReviews.length;
+    }
+    final buddy = _buddies.where((b) => b.id == userId).firstOrNull;
+    return buddy?.rating ?? 0.0;
+  }
+
+  /// Get live review count for a user
+  int getReviewCountForUser(String userId) {
+    final userReviews = getReviewsForUser(userId);
+    if (userReviews.isNotEmpty) {
+      return userReviews.length;
+    }
+    final buddy = _buddies.where((b) => b.id == userId).firstOrNull;
+    return buddy?.totalReviews ?? 0;
   }
 
   /// Filter buddies based on search query, city, category, max price

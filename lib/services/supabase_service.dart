@@ -154,6 +154,26 @@ class SupabaseService {
     return false;
   }
 
+  /// Update profile stats (e.g. rating, total_reviews, completed_bookings) in Supabase
+  Future<bool> updateProfileStats(String userId, {double? rating, int? totalReviews, int? completedBookings}) async {
+    if (!isConfigured) return false;
+
+    try {
+      final url = Uri.parse('${AppConfig.supabaseUrl}/rest/v1/profiles?id=eq.$userId');
+      final Map<String, dynamic> payloadMap = {};
+      if (rating != null) payloadMap['rating'] = rating;
+      if (totalReviews != null) payloadMap['total_reviews'] = totalReviews;
+      if (completedBookings != null) payloadMap['completed_bookings'] = completedBookings;
+      payloadMap['updated_at'] = DateTime.now().toUtc().toIso8601String();
+
+      final response = await http.patch(url, headers: _headers, body: jsonEncode(payloadMap));
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (e) {
+      debugPrint('[SupabaseService] Error updating profile stats: $e');
+      return false;
+    }
+  }
+
   /// Delete user profile from Supabase
   Future<bool> deleteProfile(String userId) async {
     if (!isConfigured) return false;

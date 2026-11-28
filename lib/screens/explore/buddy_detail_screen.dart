@@ -180,28 +180,35 @@ class _BuddyDetailScreenState extends State<BuddyDetailScreen> {
                                 ),
                               ),
                             const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.star_rounded,
-                                    color: buddy.totalReviews > 0 ? const Color(0xFFFBBF24) : Colors.grey.shade400,
-                                    size: 14,
+                            Builder(
+                              builder: (context) {
+                                final repo = BuddyRepository.instance;
+                                final liveRating = repo.getRatingForUser(buddy.id);
+                                final liveReviews = repo.getReviewCountForUser(buddy.id);
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    borderRadius: BorderRadius.circular(20),
                                   ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    buddy.totalReviews > 0
-                                        ? '${buddy.rating.toStringAsFixed(1)} (${buddy.totalReviews} reviews)'
-                                        : 'New Companion (No reviews yet)',
-                                    style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.star_rounded,
+                                        color: liveReviews > 0 ? const Color(0xFFFBBF24) : Colors.grey.shade400,
+                                        size: 14,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        liveReviews > 0
+                                            ? '${liveRating.toStringAsFixed(1)} ($liveReviews ${liveReviews == 1 ? "review" : "reviews"})'
+                                            : 'New Companion (No reviews yet)',
+                                        style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                );
+                              },
                             ),
                           ],
                         ),
@@ -251,7 +258,13 @@ class _BuddyDetailScreenState extends State<BuddyDetailScreen> {
                           children: [
                             _buildStatItem('HOURLY RATE', '₹${buddy.hourlyRate.toInt()}', AppTheme.primary),
                             Container(height: 36, width: 1, color: AppTheme.cardBorderSubtle),
-                            _buildStatItem('SESSIONS', '${buddy.completedBookings}+', AppTheme.secondary),
+                            Builder(
+                              builder: (context) {
+                                final count = BuddyRepository.instance.getCompletedSessionsCount(buddy.id);
+                                final label = '$count';
+                                return _buildStatItem('SESSIONS', label, AppTheme.secondary);
+                              },
+                            ),
                             Container(height: 36, width: 1, color: AppTheme.cardBorderSubtle),
                             _buildStatItem('LOCATION', (buddy.state.isNotEmpty && !buddy.city.toLowerCase().contains(buddy.state.toLowerCase())) ? '${buddy.city}, ${buddy.state}' : buddy.city, const Color(0xFF0F172A)),
                           ],

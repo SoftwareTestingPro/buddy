@@ -519,6 +519,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // If already on the tab, tapping scrolls to top smoothly
           _scrollToTopOfTab(index);
         } else {
+          BuddyRepository.instance.setActiveHomeTab(index);
           setState(() => _currentTab = index);
           // When switching tabs, ensure the target tab starts at the top
           WidgetsBinding.instance.addPostFrameCallback((_) {

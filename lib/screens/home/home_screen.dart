@@ -4,6 +4,7 @@ import '../../data/app_data.dart';
 import '../../models/user_profile.dart';
 import '../../services/buddy_repository.dart';
 import '../../services/mock_data.dart';
+import '../../services/notification_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/buddy_card.dart';
 import '../auth/google_auth_dialog.dart';
@@ -57,6 +58,190 @@ class _HomeScreenState extends State<HomeScreen> {
         curve: Curves.easeOut,
       );
     }
+  }
+
+  void _showNotificationCenterModal(BuildContext context) {
+    final currentUserId = BuddyRepository.instance.currentUser?.id;
+    if (currentUserId != null) {
+      NotificationService.instance.syncRemoteNotifications(currentUserId);
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          height: MediaQuery.of(ctx).size.height * 0.75,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.notifications_active_rounded, color: AppTheme.primary, size: 22),
+                        SizedBox(width: 8),
+                        Text(
+                          'Notifications',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                        ),
+                      ],
+                    ),
+                    if (currentUserId != null)
+                      TextButton(
+                        onPressed: () {
+                          NotificationService.instance.markAllAsRead(currentUserId);
+                        },
+                        child: const Text('Mark all as read', style: TextStyle(fontSize: 12)),
+                      ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: NotificationService.instance,
+                  builder: (context, _) {
+                    final notifs = NotificationService.instance.notifications;
+                    if (notifs.isEmpty) {
+                      return const Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.notifications_none_rounded, size: 54, color: AppTheme.textMuted),
+                            SizedBox(height: 12),
+                            Text(
+                              'No Notifications Yet',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              'Booking requests, acceptances, and session alerts will appear here.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 12.5, color: AppTheme.textSecondary),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: notifs.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, idx) {
+                        final n = notifs[idx];
+                        Color iconColor = AppTheme.primary;
+                        IconData iconData = Icons.notifications_rounded;
+
+                        if (n.type == 'booking_request') {
+                          iconColor = const Color(0xFFD97706);
+                          iconData = Icons.event_available_rounded;
+                        } else if (n.type == 'booking_accepted' || n.type == 'meetup_ended') {
+                          iconColor = AppTheme.success;
+                          iconData = Icons.check_circle_rounded;
+                        } else if (n.type == 'booking_declined' || n.type == 'booking_cancelled' || n.type == 'dispute') {
+                          iconColor = Colors.red;
+                          iconData = Icons.event_busy_rounded;
+                        } else if (n.type == 'meetup_started') {
+                          iconColor = const Color(0xFF4F46E5);
+                          iconData = Icons.timer_rounded;
+                        }
+
+                        return InkWell(
+                          onTap: () {
+                            if (currentUserId != null && !n.isRead) {
+                              NotificationService.instance.markAsRead(n.id, currentUserId);
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: n.isRead ? const Color(0xFFF8FAFC) : const Color(0xFFEFF6FF),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: n.isRead ? AppTheme.cardBorderSubtle : const Color(0xFFBFDBFE),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: iconColor.withOpacity(0.12),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(iconData, color: iconColor, size: 20),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              n.title,
+                                              style: TextStyle(
+                                                fontWeight: n.isRead ? FontWeight.w600 : FontWeight.bold,
+                                                fontSize: 13.5,
+                                                color: AppTheme.textPrimary,
+                                              ),
+                                            ),
+                                          ),
+                                          if (!n.isRead)
+                                            Container(
+                                              width: 8,
+                                              height: 8,
+                                              decoration: const BoxDecoration(
+                                                color: AppTheme.primary,
+                                                shape: BoxShape.circle,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        n.message,
+                                        style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary, height: 1.3),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -465,6 +650,48 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
+                  const Spacer(),
+                  // Notification Center Bell with live unread badge
+                  ListenableBuilder(
+                    listenable: NotificationService.instance,
+                    builder: (context, _) {
+                      final unread = NotificationService.instance.unreadCount;
+                      return Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.notifications_outlined, color: AppTheme.textPrimary, size: 24),
+                            onPressed: () => _showNotificationCenterModal(context),
+                          ),
+                          if (unread > 0)
+                            Positioned(
+                              top: 6,
+                              right: 6,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: Colors.red,
+                                  shape: BoxShape.circle,
+                                ),
+                                constraints: const BoxConstraints(
+                                  minWidth: 16,
+                                  minHeight: 16,
+                                ),
+                                child: Text(
+                                  unread > 9 ? '9+' : '$unread',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
@@ -526,7 +753,9 @@ class _HomeScreenState extends State<HomeScreen> {
             _scrollToTopOfTab(index);
           });
         }
-        if (index == 3) {
+        if (index == 0) {
+          BuddyRepository.instance.loadRemoteBuddies();
+        } else if (index == 3) {
           BuddyRepository.instance.loadRemoteBookings();
         }
       },
@@ -575,10 +804,13 @@ class _HomeScreenState extends State<HomeScreen> {
           maxPrice: _maxPrice,
         );
 
-        return SingleChildScrollView(
-          controller: _exploreScrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Center(
+        return RefreshIndicator(
+          onRefresh: () => repo.loadRemoteBuddies(),
+          child: SingleChildScrollView(
+            controller: _exploreScrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 880),
               child: Column(
@@ -1160,8 +1392,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 }

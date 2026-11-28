@@ -1,4 +1,4 @@
-enum BookingStatus { pending, confirmed, completed, cancelled }
+enum BookingStatus { pending, confirmed, inProgress, completed, cancelled, disputed }
 
 class Booking {
   final String id;
@@ -15,6 +15,10 @@ class Booking {
   final String meetingLocation;
   final String notes;
   final BookingStatus status;
+  final String startPin;
+  final String endPin;
+  final DateTime? startedAt;
+  final DateTime? completedAt;
 
   Booking({
     required this.id,
@@ -31,6 +35,10 @@ class Booking {
     required this.meetingLocation,
     this.notes = '',
     this.status = BookingStatus.pending,
+    this.startPin = '',
+    this.endPin = '',
+    this.startedAt,
+    this.completedAt,
   });
 
   Map<String, dynamic> toJson() {
@@ -49,6 +57,10 @@ class Booking {
       'meetingLocation': meetingLocation,
       'notes': notes,
       'status': status.name,
+      'startPin': startPin,
+      'endPin': endPin,
+      'startedAt': startedAt?.toIso8601String(),
+      'completedAt': completedAt?.toIso8601String(),
     };
   }
 
@@ -71,6 +83,10 @@ class Booking {
         (e) => e.name == json['status'],
         orElse: () => BookingStatus.pending,
       ),
+      startPin: json['startPin'] as String? ?? '',
+      endPin: json['endPin'] as String? ?? '',
+      startedAt: json['startedAt'] != null ? DateTime.tryParse(json['startedAt'] as String) : null,
+      completedAt: json['completedAt'] != null ? DateTime.tryParse(json['completedAt'] as String) : null,
     );
   }
 }

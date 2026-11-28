@@ -4,7 +4,10 @@ import 'screens/auth/google_login_screen.dart';
 import 'screens/auth/profile_setup_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'services/buddy_repository.dart';
+import 'services/notification_service.dart';
 import 'theme/app_theme.dart';
+
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,6 +18,10 @@ void main() async {
   // Initialize Auth & Database Repositories
   await BuddyRepository.instance.init();
 
+  // Link notification service to navigator overlay
+  NotificationService.instance.navigatorKey = appNavigatorKey;
+  await NotificationService.instance.init(BuddyRepository.instance.currentUser?.id);
+
   runApp(const BuddyApp());
 }
 
@@ -24,6 +31,7 @@ class BuddyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: appNavigatorKey,
       title: 'Buddy - Hire a Buddy or Become One',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,

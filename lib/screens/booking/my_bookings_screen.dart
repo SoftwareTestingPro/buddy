@@ -5,6 +5,8 @@ import '../../services/buddy_repository.dart';
 import '../../theme/app_theme.dart';
 import '../auth/google_auth_dialog.dart';
 import '../explore/buddy_detail_screen.dart';
+import '../../widgets/meetup_session_timer_card.dart';
+import '../../widgets/review_submission_dialog.dart';
 
 class MyBookingsScreen extends StatelessWidget {
   final bool showAppBar;
@@ -53,6 +55,132 @@ class MyBookingsScreen extends StatelessWidget {
     }
   }
 
+  static Future<void> _openClientProfile(BuildContext context, Booking booking) async {
+    final repo = BuddyRepository.instance;
+    final client = await repo.getBuddyById(booking.clientId);
+    if (!context.mounted) return;
+
+    if (client != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => BuddyDetailScreen(buddy: client),
+        ),
+      );
+    } else {
+      // If full record not in cache, construct profile from booking info
+      final fallbackClient = UserProfile(
+        id: booking.clientId,
+        fullName: booking.clientName,
+        email: '',
+        phoneNumber: '',
+        city: booking.city,
+        bio: 'Companion seeker based in ${booking.city}.',
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => BuddyDetailScreen(buddy: fallbackClient),
+        ),
+      );
+    }
+  }
+
+  static Future<void> _showStartPinVerificationDialog(BuildContext context, Booking booking) async {
+    final pinController = TextEditingController();
+    String? errorMessage;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Row(
+                children: [
+                  Icon(Icons.pin_rounded, color: AppTheme.primary, size: 24),
+                  SizedBox(width: 8),
+                  Text('Start Meetup Session', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Ask ${booking.clientName} for their 4-digit start PIN to confirm you both met in person at the venue.',
+                    style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, height: 1.4),
+                  ),
+                  const SizedBox(height: 18),
+                  TextField(
+                    controller: pinController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 4,
+                    textAlign: TextAlign.center,
+                    autofocus: true,
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 10,
+                      color: AppTheme.primary,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: '••••',
+                      counterText: '',
+                      errorText: errorMessage,
+                      filled: true,
+                      fillColor: const Color(0xFFF8FAFC),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final entered = pinController.text.trim();
+                    if (entered.length < 4) {
+                      setState(() => errorMessage = 'Please enter all 4 digits');
+                      return;
+                    }
+
+                    final success = await BuddyRepository.instance.verifyAndStartMeetup(booking.id, entered);
+                    if (success) {
+                      if (context.mounted) {
+                        Navigator.of(ctx).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Meetup verified! Timer started for ${booking.durationHours} hours.'),
+                            backgroundColor: AppTheme.success,
+                          ),
+                        );
+                      }
+                    } else {
+                      setState(() => errorMessage = 'Incorrect PIN. Please re-check with client.');
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
+                  child: const Text('Verify & Start'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   static Future<void> _confirmCancelBooking(BuildContext context, Booking booking) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -80,7 +208,12 @@ class MyBookingsScreen extends StatelessWidget {
     );
 
     if (confirmed == true && context.mounted) {
-      await BuddyRepository.instance.updateBookingStatus(booking.id, BookingStatus.cancelled);
+      final currentUid = BuddyRepository.instance.currentUser?.id;
+      await BuddyRepository.instance.updateBookingStatus(
+        booking.id,
+        BookingStatus.cancelled,
+        cancelledByUserId: currentUid,
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -199,21 +332,31 @@ class MyBookingsScreen extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: b.status == BookingStatus.confirmed
                               ? AppTheme.success.withOpacity(0.12)
-                              : (b.status == BookingStatus.pending
-                                  ? AppTheme.warning.withOpacity(0.12)
-                                  : Colors.red.withOpacity(0.12)),
+                              : (b.status == BookingStatus.inProgress
+                                  ? const Color(0xFF6366F1).withOpacity(0.12)
+                                  : (b.status == BookingStatus.disputed
+                                      ? Colors.orange.withOpacity(0.15)
+                                      : (b.status == BookingStatus.pending
+                                          ? AppTheme.warning.withOpacity(0.12)
+                                          : Colors.red.withOpacity(0.12)))),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          b.status.name.toUpperCase(),
+                          b.status == BookingStatus.inProgress
+                              ? 'IN PROGRESS'
+                              : (b.status == BookingStatus.disputed ? 'DISPUTED' : b.status.name.toUpperCase()),
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             color: b.status == BookingStatus.confirmed
                                 ? AppTheme.success
-                                : (b.status == BookingStatus.pending
-                                    ? AppTheme.warning
-                                    : Colors.red.shade700),
+                                : (b.status == BookingStatus.inProgress
+                                    ? const Color(0xFF4F46E5)
+                                    : (b.status == BookingStatus.disputed
+                                        ? Colors.orange.shade900
+                                        : (b.status == BookingStatus.pending
+                                            ? AppTheme.warning
+                                            : Colors.red.shade700))),
                           ),
                         ),
                       ),
@@ -225,7 +368,32 @@ class MyBookingsScreen extends StatelessWidget {
                       const Icon(Icons.person_pin_circle_outlined, size: 16, color: AppTheme.primary),
                       const SizedBox(width: 4),
                       if (repo.currentUser != null && repo.currentUser!.id == b.buddyId) ...[
-                        Text('Client: ${b.clientName} in ${b.city}', style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+                        const Text('Client: ', style: TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
+                        InkWell(
+                          onTap: () => _openClientProfile(context, b),
+                          borderRadius: BorderRadius.circular(4),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  b.clientName,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.primary,
+                                    decoration: TextDecoration.underline,
+                                    decorationColor: AppTheme.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 3),
+                                const Icon(Icons.open_in_new_rounded, size: 13, color: AppTheme.primary),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Text(' in ${b.city}', style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary, fontWeight: FontWeight.w600)),
                       ] else ...[
                         const Text('With ', style: TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
                         InkWell(
@@ -313,7 +481,119 @@ class MyBookingsScreen extends StatelessWidget {
                     ),
                   ],
                   const Divider(height: 20, color: AppTheme.cardBorder),
-                  // If the current logged in user is the buddy and status is pending, show Confirm & Decline actions
+
+                  // 1. Live Countdown Timer if session is currently In Progress
+                  if (b.status == BookingStatus.inProgress)
+                    MeetupSessionTimerCard(booking: b),
+
+                  // 2. Start PIN Display for the Client when Confirmed
+                  if (repo.currentUser != null && repo.currentUser!.id == b.clientId && b.status == BookingStatus.confirmed) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFBBF7D0)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFDCFCE7),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.key_rounded, size: 20, color: Color(0xFF15803D)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Your Start Meetup PIN',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF166534)),
+                                ),
+                                const SizedBox(height: 2),
+                                const Text(
+                                  'Share this code in person when you meet your buddy to begin the session clock.',
+                                  style: TextStyle(fontSize: 11.5, color: Color(0xFF15803D)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
+                            ),
+                            child: Text(
+                              b.startPin.isNotEmpty ? b.startPin : '7429',
+                              style: const TextStyle(
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.w900,
+                                fontSize: 18,
+                                letterSpacing: 2,
+                                color: Color(0xFF166534),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  // 3. Start PIN Entry Button for the Buddy when Confirmed
+                  if (repo.currentUser != null && repo.currentUser!.id == b.buddyId && b.status == BookingStatus.confirmed) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.handshake_outlined, size: 18, color: Color(0xFF1D4ED8)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Met with ${b.clientName} at the venue?',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1E40AF)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Enter the 4-digit PIN provided by the client to activate the 2-hour session timer.',
+                            style: TextStyle(fontSize: 12, color: Color(0xFF1E3A8A)),
+                          ),
+                          const SizedBox(height: 10),
+                          ElevatedButton.icon(
+                            onPressed: () => _showStartPinVerificationDialog(context, b),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            icon: const Icon(Icons.pin_rounded, size: 16),
+                            label: const Text('Enter Start PIN & Begin Session', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  // 4. If the current logged in user is the buddy and status is pending, show Confirm & Decline actions
                   if (repo.currentUser != null && repo.currentUser!.id == b.buddyId && b.status == BookingStatus.pending) ...[
                     Container(
                       padding: const EdgeInsets.all(10),
@@ -363,7 +643,11 @@ class MyBookingsScreen extends StatelessWidget {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () async {
-                              await repo.updateBookingStatus(b.id, BookingStatus.cancelled);
+                              await repo.updateBookingStatus(
+                                b.id,
+                                BookingStatus.cancelled,
+                                cancelledByUserId: repo.currentUser?.id,
+                              );
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text('Booking declined.')),
@@ -392,6 +676,41 @@ class MyBookingsScreen extends StatelessWidget {
                       ),
                       Row(
                         children: [
+                          // If session is completed, show Rate & Review button for both User1 and User2
+                          if (b.status == BookingStatus.completed) ...[
+                            Builder(
+                              builder: (context) {
+                                final alreadyReviewed = repo.hasReviewedBooking(b.id);
+                                return ElevatedButton.icon(
+                                  onPressed: alreadyReviewed
+                                      ? null
+                                      : () => ReviewSubmissionDialog.show(context, b),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: alreadyReviewed ? Colors.grey.shade200 : const Color(0xFFFEF3C7),
+                                    foregroundColor: alreadyReviewed ? AppTheme.textMuted : const Color(0xFFB45309),
+                                    elevation: 0,
+                                    side: BorderSide(
+                                      color: alreadyReviewed ? Colors.transparent : const Color(0xFFFDE68A),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  icon: Icon(
+                                    alreadyReviewed ? Icons.check_circle_rounded : Icons.star_rate_rounded,
+                                    size: 14,
+                                    color: alreadyReviewed ? AppTheme.textMuted : const Color(0xFFD97706),
+                                  ),
+                                  label: Text(
+                                    alreadyReviewed ? 'Reviewed' : 'Rate & Review',
+                                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(width: 8),
+                          ],
                           if (b.status != BookingStatus.cancelled && b.status != BookingStatus.completed)
                             TextButton.icon(
                               onPressed: () => _confirmCancelBooking(context, b),

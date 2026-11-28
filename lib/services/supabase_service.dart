@@ -221,13 +221,29 @@ class SupabaseService {
     return [];
   }
 
-  /// Update booking status in Supabase
-  Future<bool> updateBookingStatus(String bookingId, String status) async {
+  /// Update booking status and optional session metadata (e.g. started_at, end_pin, completed_at) in Supabase
+  Future<bool> updateBookingStatus(
+    String bookingId,
+    String status, {
+    DateTime? startedAt,
+    DateTime? completedAt,
+    String? endPin,
+  }) async {
     if (!isConfigured) return false;
 
     try {
       final url = Uri.parse('${AppConfig.supabaseUrl}/rest/v1/bookings?id=eq.$bookingId');
-      final payload = jsonEncode({'status': status});
+      final Map<String, dynamic> payloadMap = {'status': status};
+      if (startedAt != null) {
+        payloadMap['started_at'] = startedAt.toUtc().toIso8601String();
+      }
+      if (completedAt != null) {
+        payloadMap['completed_at'] = completedAt.toUtc().toIso8601String();
+      }
+      if (endPin != null) {
+        payloadMap['end_pin'] = endPin;
+      }
+      final payload = jsonEncode(payloadMap);
 
       final headers = Map<String, String>.from(_headers);
       final response = await http.patch(url, headers: headers, body: payload);
@@ -242,6 +258,119 @@ class SupabaseService {
       debugPrint('[SupabaseService] Error updating booking status in Supabase: $e');
     }
     return false;
+  }
+
+  /// Create and store a notification in Supabase for user1 or user2
+  Future<bool> sendNotification(Map<String, dynamic> notificationData) async {
+    if (!isConfigured) {
+      debugPrint('[SupabaseService] Supabase not configured. Notification saved to local state only.');
+      return false;
+    }
+
+    try {
+      final url = Uri.parse('${AppConfig.supabaseUrl}/rest/v1/notifications');
+      final payload = jsonEncode(notificationData);
+      final headers = Map<String, String>.from(_headers);
+      headers['Prefer'] = 'return=minimal';
+
+      final response = await http.post(url, headers: headers, body: payload);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        debugPrint('[SupabaseService] Notification saved to Supabase: ${notificationData['title']}');
+        return true;
+      } else {
+        debugPrint('[SupabaseService] Failed to insert notification (${response.statusCode}): ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] Error sending notification: $e');
+    }
+    return false;
+  }
+
+  /// Fetch notifications addressed to a user
+  Future<List<Map<String, dynamic>>> fetchNotifications(String userId) async {
+    if (!isConfigured) return [];
+
+    try {
+      final url = Uri.parse(
+        '${AppConfig.supabaseUrl}/rest/v1/notifications?recipient_id=eq.$userId&select=*&order=created_at.desc&limit=50',
+      );
+      final response = await http.get(url, headers: _headers);
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data.cast<Map<String, dynamic>>();
+      } else {
+        debugPrint('[SupabaseService] fetchNotifications failed (${response.statusCode}): ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] Error fetching notifications: $e');
+    }
+    return [];
+  }
+
+  /// Mark notification as read
+  Future<bool> markNotificationAsRead(String notificationId) async {
+    if (!isConfigured) return false;
+
+    try {
+      final url = Uri.parse(
+        '${AppConfig.supabaseUrl}/rest/v1/notifications?id=eq.$notificationId',
+      );
+      final payload = jsonEncode({'is_read': true});
+      final response = await http.patch(url, headers: _headers, body: payload);
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (e) {
+      debugPrint('[SupabaseService] Error marking notification read: $e');
+      return false;
+    }
+  }
+
+  /// Submit a review for a user (Buddy or Client)
+  Future<bool> submitReview(Map<String, dynamic> reviewData) async {
+    if (!isConfigured) {
+      debugPrint('[SupabaseService] Supabase not configured. Review saved locally.');
+      return false;
+    }
+
+    try {
+      final url = Uri.parse('${AppConfig.supabaseUrl}/rest/v1/reviews');
+      final payload = jsonEncode(reviewData);
+      final headers = Map<String, String>.from(_headers);
+      headers['Prefer'] = 'return=representation';
+
+      final response = await http.post(url, headers: headers, body: payload);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        debugPrint('[SupabaseService] Review submitted successfully for: ${reviewData['target_user_id']}');
+        return true;
+      } else {
+        debugPrint('[SupabaseService] Review submission failed (${response.statusCode}): ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] Error submitting review: $e');
+    }
+    return false;
+  }
+
+  /// Fetch all reviews for a specific user (displayed in their profile)
+  Future<List<Map<String, dynamic>>> fetchReviewsForUser(String targetUserId) async {
+    if (!isConfigured) return [];
+
+    try {
+      final url = Uri.parse(
+        '${AppConfig.supabaseUrl}/rest/v1/reviews?or=(target_user_id.eq.$targetUserId,buddy_id.eq.$targetUserId)&select=*&order=created_at.desc',
+      );
+      final response = await http.get(url, headers: _headers);
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        return data.cast<Map<String, dynamic>>();
+      } else {
+        debugPrint('[SupabaseService] fetchReviews failed (${response.statusCode}): ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('[SupabaseService] Error fetching reviews: $e');
+    }
+    return [];
   }
 
   /// Fetch user wishlist buddy IDs from Supabase

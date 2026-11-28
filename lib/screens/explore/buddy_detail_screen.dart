@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
+import '../../models/review.dart';
 import '../../services/buddy_repository.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_avatar.dart';
@@ -7,10 +8,24 @@ import '../auth/google_auth_dialog.dart';
 import '../booking/booking_modal.dart';
 import '../../widgets/plan_required_dialog.dart';
 
-class BuddyDetailScreen extends StatelessWidget {
+class BuddyDetailScreen extends StatefulWidget {
   final UserProfile buddy;
 
   const BuddyDetailScreen({super.key, required this.buddy});
+
+  @override
+  State<BuddyDetailScreen> createState() => _BuddyDetailScreenState();
+}
+
+class _BuddyDetailScreenState extends State<BuddyDetailScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Load remote reviews for this profile
+    BuddyRepository.instance.loadReviewsForUser(widget.buddy.id);
+  }
+
+  UserProfile get buddy => widget.buddy;
 
   void _openBooking(BuildContext context) {
     final repo = BuddyRepository.instance;
@@ -331,6 +346,10 @@ class BuddyDetailScreen extends StatelessWidget {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 32),
+
+                      // User Reviews & Star Ratings Section at the bottom of the profile
+                      _buildReviewsSection(),
                       const SizedBox(height: 48),
                     ],
                   ),
@@ -436,6 +455,173 @@ class BuddyDetailScreen extends StatelessWidget {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: color),
         ),
       ],
+    );
+  }
+
+  Widget _buildReviewsSection() {
+    return ListenableBuilder(
+      listenable: BuddyRepository.instance,
+      builder: (context, _) {
+        final reviews = BuddyRepository.instance.getReviewsForUser(buddy.id);
+        final averageRating = reviews.isEmpty
+            ? buddy.rating
+            : reviews.map((r) => r.rating).reduce((a, b) => a + b) / reviews.length;
+        final totalCount = reviews.isEmpty ? buddy.totalReviews : reviews.length;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Reviews & Ratings',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        const Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 18),
+                        const SizedBox(width: 4),
+                        Text(
+                          averageRating > 0 ? averageRating.toStringAsFixed(1) : 'New',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B)),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '($totalCount ${totalCount == 1 ? 'review' : 'reviews'})',
+                          style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            if (reviews.isEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.cardBorderSubtle),
+                ),
+                child: const Column(
+                  children: [
+                    Icon(Icons.rate_review_outlined, color: AppTheme.textMuted, size: 36),
+                    SizedBox(height: 8),
+                    Text(
+                      'No Reviews Yet',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: AppTheme.textPrimary),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Completed meetup sessions between buddies and clients will display mutual feedback here.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: reviews.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) {
+                  final r = reviews[index];
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.cardBorder),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.02),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor: const Color(0xFFE2E8F0),
+                                  backgroundImage: r.reviewerAvatarUrl.isNotEmpty
+                                      ? NetworkImage(r.reviewerAvatarUrl)
+                                      : null,
+                                  child: r.reviewerAvatarUrl.isEmpty
+                                      ? Text(
+                                          r.reviewerName.isNotEmpty ? r.reviewerName[0].toUpperCase() : 'U',
+                                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppTheme.primary),
+                                        )
+                                      : null,
+                                ),
+                                const SizedBox(width: 10),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      r.reviewerName,
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.textPrimary),
+                                    ),
+                                    Text(
+                                      '${r.createdAt.day}/${r.createdAt.month}/${r.createdAt.year}',
+                                      style: const TextStyle(fontSize: 11, color: AppTheme.textMuted),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            // Stars row for the review
+                            Row(
+                              children: List.generate(5, (starIdx) {
+                                return Icon(
+                                  starIdx < r.rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                                  color: starIdx < r.rating ? const Color(0xFFF59E0B) : const Color(0xFFCBD5E1),
+                                  size: 16,
+                                );
+                              }),
+                            ),
+                          ],
+                        ),
+                        if (r.comment.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            '"${r.comment}"',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF334155),
+                              height: 1.4,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ],
+        );
+      },
     );
   }
 }

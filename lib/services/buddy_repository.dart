@@ -5,7 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/user_profile.dart';
 import '../models/booking.dart';
+import '../models/review.dart';
 import 'mock_data.dart';
+import 'notification_service.dart';
 import 'supabase_service.dart';
 
 class BuddyRepository extends ChangeNotifier {
@@ -13,6 +15,7 @@ class BuddyRepository extends ChangeNotifier {
   final List<UserProfile> _buddies = [];
   final List<Booking> _bookings = [];
   final Set<String> _wishlistBuddyIds = {};
+  final List<Review> _reviews = [];
   bool _isLoading = false;
   int _activeHomeTabIndex = 0;
 
@@ -30,6 +33,7 @@ class BuddyRepository extends ChangeNotifier {
   List<UserProfile> get buddies => List.unmodifiable(_buddies);
   List<Booking> get bookings => List.unmodifiable(_bookings);
   Set<String> get wishlistBuddyIds => Set.unmodifiable(_wishlistBuddyIds);
+  List<Review> get reviews => List.unmodifiable(_reviews);
   List<UserProfile> get wishlistedBuddies =>
       _buddies.where((b) => _wishlistBuddyIds.contains(b.id)).toList();
 
@@ -154,6 +158,7 @@ class BuddyRepository extends ChangeNotifier {
     try {
       final remoteList = await SupabaseService.instance.fetchBuddies();
       if (remoteList.isNotEmpty) {
+        // Keep sample buddies that aren't in remote, but prioritize/update remote buddies
         for (final remoteBuddy in remoteList) {
           final idx = _buddies.indexWhere((b) => b.id == remoteBuddy.id);
           if (idx >= 0) {
@@ -185,6 +190,24 @@ class BuddyRepository extends ChangeNotifier {
             parsedDateTime = parsedDateTime.toLocal();
           }
 
+          final rawStartedAt = row['started_at']?.toString();
+          DateTime? parsedStartedAt;
+          if (rawStartedAt != null && rawStartedAt.isNotEmpty) {
+            parsedStartedAt = DateTime.tryParse(rawStartedAt);
+            if (parsedStartedAt != null && parsedStartedAt.isUtc) {
+              parsedStartedAt = parsedStartedAt.toLocal();
+            }
+          }
+
+          DateTime? parsedCompletedAt;
+          if (row['completed_at'] != null) {
+            try {
+              parsedCompletedAt = DateTime.parse(row['completed_at'].toString()).toLocal();
+            } catch (_) {
+              parsedCompletedAt = null;
+            }
+          }
+
           return Booking(
             id: row['id']?.toString() ?? '',
             clientId: row['client_id']?.toString() ?? '',
@@ -203,6 +226,10 @@ class BuddyRepository extends ChangeNotifier {
               (e) => e.name == row['status'],
               orElse: () => BookingStatus.pending,
             ),
+            startPin: row['start_pin']?.toString() ?? '',
+            startedAt: parsedStartedAt,
+            endPin: row['end_pin']?.toString() ?? '',
+            completedAt: parsedCompletedAt,
           );
         }).toList();
 
@@ -444,6 +471,9 @@ class BuddyRepository extends ChangeNotifier {
     await Future.delayed(const Duration(milliseconds: 500));
 
     final total = buddy.hourlyRate * durationHours;
+    // Generate a secure 4-digit mutual start PIN
+    final randomPin = (1000 + (DateTime.now().microsecondsSinceEpoch % 9000)).toString();
+
     final booking = Booking(
       id: 'bk_${DateTime.now().millisecondsSinceEpoch}',
       clientId: _currentUser?.id ?? 'guest_client',
@@ -459,6 +489,7 @@ class BuddyRepository extends ChangeNotifier {
       meetingLocation: meetingLocation,
       notes: notes,
       status: BookingStatus.pending,
+      startPin: randomPin,
     );
 
     _bookings.insert(0, booking);
@@ -481,15 +512,35 @@ class BuddyRepository extends ChangeNotifier {
         'meeting_location': booking.meetingLocation,
         'notes': booking.notes,
         'status': booking.status.name,
+        'start_pin': booking.startPin,
       });
     }
+
+    // Scenario 1: Notification sent to User2 (buddy) when User1 books User2
+    await NotificationService.instance.send(
+      recipientId: buddy.id,
+      senderId: booking.clientId,
+      senderName: booking.clientName,
+      bookingId: booking.id,
+      title: 'New Booking Request Received! 📅',
+      message: '${booking.clientName} booked you for ${booking.activity} in ${booking.city} (${booking.durationHours} hrs).',
+      type: 'booking_request',
+      currentUserId: _currentUser?.id,
+    );
 
     _setLoading(false);
     return booking;
   }
 
-  /// Update booking status (e.g. pending -> confirmed or cancelled)
-  Future<void> updateBookingStatus(String bookingId, BookingStatus newStatus) async {
+  /// Update booking status (e.g. pending -> confirmed, inProgress, completed, cancelled, disputed)
+  Future<void> updateBookingStatus(
+    String bookingId,
+    BookingStatus newStatus, {
+    DateTime? startedAt,
+    DateTime? completedAt,
+    String? endPin,
+    String? cancelledByUserId,
+  }) async {
     final idx = _bookings.indexWhere((b) => b.id == bookingId);
     if (idx >= 0) {
       final old = _bookings[idx];
@@ -508,12 +559,323 @@ class BuddyRepository extends ChangeNotifier {
         meetingLocation: old.meetingLocation,
         notes: old.notes,
         status: newStatus,
+        startPin: old.startPin,
+        startedAt: startedAt ?? old.startedAt,
+        endPin: endPin ?? old.endPin,
+        completedAt: completedAt ?? old.completedAt,
       );
       _bookings[idx] = updated;
       await _saveBookings();
-      await SupabaseService.instance.updateBookingStatus(bookingId, newStatus.name);
+      await SupabaseService.instance.updateBookingStatus(
+        bookingId,
+        newStatus.name,
+        startedAt: startedAt ?? old.startedAt,
+        completedAt: completedAt ?? old.completedAt,
+        endPin: endPin ?? old.endPin,
+      );
       notifyListeners();
+
+      // Dispatch Scenario Notifications based on status transitions
+      final currentUid = _currentUser?.id;
+
+      // Scenario 2: User1 receives notification when User2 accepts or declines
+      if (newStatus == BookingStatus.confirmed) {
+        await NotificationService.instance.send(
+          recipientId: old.clientId,
+          senderId: old.buddyId,
+          senderName: old.buddyName,
+          bookingId: old.id,
+          title: 'Booking Confirmed! 🎉',
+          message: '${old.buddyName} accepted your hangout request for ${old.activity} in ${old.city}.',
+          type: 'booking_accepted',
+          currentUserId: currentUid,
+        );
+      }
+
+      // Scenario 3: User1 & User2 notification when booking is cancelled
+      if (newStatus == BookingStatus.cancelled) {
+        final isCancelledByBuddy = (cancelledByUserId ?? currentUid) == old.buddyId;
+
+        if (isCancelledByBuddy) {
+          // Buddy declined or cancelled
+          // Notification to User1 (client): clearly mentions User2 cancelled
+          await NotificationService.instance.send(
+            recipientId: old.clientId,
+            senderId: old.buddyId,
+            senderName: old.buddyName,
+            bookingId: old.id,
+            title: 'Booking Cancelled ❌',
+            message: '${old.buddyName} has cancelled the booking with you.',
+            type: 'booking_cancelled',
+            currentUserId: currentUid,
+          );
+          // Notification to User2 (buddy): clearly confirms their own action
+          await NotificationService.instance.send(
+            recipientId: old.buddyId,
+            senderId: old.clientId,
+            senderName: old.clientName,
+            bookingId: old.id,
+            title: 'Booking Cancelled ❌',
+            message: 'You have cancelled the booking with ${old.clientName}.',
+            type: 'booking_cancelled',
+            currentUserId: currentUid,
+          );
+        } else {
+          // Client cancelled
+          // Notification to User2 (buddy): clearly mentions User1 cancelled
+          await NotificationService.instance.send(
+            recipientId: old.buddyId,
+            senderId: old.clientId,
+            senderName: old.clientName,
+            bookingId: old.id,
+            title: 'Booking Cancelled ❌',
+            message: '${old.clientName} has cancelled the booking with you.',
+            type: 'booking_cancelled',
+            currentUserId: currentUid,
+          );
+          // Notification to User1 (client): clearly confirms their own action
+          await NotificationService.instance.send(
+            recipientId: old.clientId,
+            senderId: old.buddyId,
+            senderName: old.buddyName,
+            bookingId: old.id,
+            title: 'Booking Cancelled ❌',
+            message: 'You have cancelled the booking with ${old.buddyName}.',
+            type: 'booking_cancelled',
+            currentUserId: currentUid,
+          );
+        }
+      }
+
+      // Scenario 4: Meeting Starts (In Progress)
+      if (newStatus == BookingStatus.inProgress) {
+        // Notification to User1 (client)
+        await NotificationService.instance.send(
+          recipientId: old.clientId,
+          senderId: old.buddyId,
+          senderName: old.buddyName,
+          bookingId: old.id,
+          title: 'Meetup Started! ⏱️',
+          message: 'Your hangout session with ${old.buddyName} has officially begun.',
+          type: 'meetup_started',
+          currentUserId: currentUid,
+        );
+        // Notification to User2 (buddy)
+        await NotificationService.instance.send(
+          recipientId: old.buddyId,
+          senderId: old.clientId,
+          senderName: old.clientName,
+          bookingId: old.id,
+          title: 'Meetup Started! ⏱️',
+          message: 'Your hangout session with ${old.clientName} has officially begun. Enjoy!',
+          type: 'meetup_started',
+          currentUserId: currentUid,
+        );
+      }
+
+      // Scenario 4: Meeting Ends (Completed)
+      if (newStatus == BookingStatus.completed) {
+        // Notification to User1 (client)
+        await NotificationService.instance.send(
+          recipientId: old.clientId,
+          senderId: old.buddyId,
+          senderName: old.buddyName,
+          bookingId: old.id,
+          title: 'Meetup Concluded! ✨',
+          message: 'Your hangout session with ${old.buddyName} has ended. Don\'t forget to leave a review!',
+          type: 'meetup_ended',
+          currentUserId: currentUid,
+        );
+        // Notification to User2 (buddy)
+        await NotificationService.instance.send(
+          recipientId: old.buddyId,
+          senderId: old.clientId,
+          senderName: old.clientName,
+          bookingId: old.id,
+          title: 'Meetup Concluded! 💰',
+          message: 'Meetup with ${old.clientName} successfully concluded. Your payout is scheduled for transfer.',
+          type: 'meetup_ended',
+          currentUserId: currentUid,
+        );
+      }
+
+      // Scenario 5: Dispute happens
+      if (newStatus == BookingStatus.disputed) {
+        // Notification to User1 (client)
+        await NotificationService.instance.send(
+          recipientId: old.clientId,
+          senderId: old.buddyId,
+          senderName: old.buddyName,
+          bookingId: old.id,
+          title: 'Session Flagged for Dispute ⚠️',
+          message: 'You reported an early departure or dispute for the session with ${old.buddyName}. Payout has been paused.',
+          type: 'dispute',
+          currentUserId: currentUid,
+        );
+        // Notification to User2 (buddy)
+        await NotificationService.instance.send(
+          recipientId: old.buddyId,
+          senderId: old.clientId,
+          senderName: old.clientName,
+          bookingId: old.id,
+          title: 'Session Disputed ⚠️',
+          message: '${old.clientName} flagged an issue/early departure regarding the meetup. Support will review.',
+          type: 'dispute',
+          currentUserId: currentUid,
+        );
+      }
     }
+  }
+
+  /// Verify 4-digit start PIN and begin in-progress meetup session.
+  /// Dynamically generates the 4-digit End PIN only upon successful start.
+  Future<bool> verifyAndStartMeetup(String bookingId, String enteredPin) async {
+    final idx = _bookings.indexWhere((b) => b.id == bookingId);
+    if (idx < 0) return false;
+
+    final booking = _bookings[idx];
+    if (booking.startPin.trim() != enteredPin.trim()) {
+      return false;
+    }
+
+    final now = DateTime.now();
+    // Generate End PIN dynamically now that the session is officially starting
+    final dynamicEndPin = (1000 + (DateTime.now().microsecondsSinceEpoch % 9000)).toString();
+
+    await updateBookingStatus(
+      bookingId,
+      BookingStatus.inProgress,
+      startedAt: now,
+      endPin: dynamicEndPin,
+    );
+    return true;
+  }
+
+  /// Verify 4-digit End PIN provided by client to buddy when meetup finishes
+  Future<bool> verifyAndEndMeetup(String bookingId, String enteredEndPin) async {
+    final idx = _bookings.indexWhere((b) => b.id == bookingId);
+    if (idx < 0) return false;
+
+    final booking = _bookings[idx];
+    if (booking.endPin.trim() != enteredEndPin.trim()) {
+      return false;
+    }
+
+    final now = DateTime.now();
+    await updateBookingStatus(
+      bookingId,
+      BookingStatus.completed,
+      completedAt: now,
+    );
+    return true;
+  }
+
+  /// Client reports companion left early or abandoned the session.
+  /// Freezes payment, halts timer, and marks status as disputed.
+  Future<void> disputeSession(String bookingId, {String? reason}) async {
+    await updateBookingStatus(
+      bookingId,
+      BookingStatus.disputed,
+    );
+  }
+
+  /// Buddy requests auto-completion when scheduled duration has elapsed
+  /// and client left early or didn't share the End PIN.
+  Future<bool> autoCompleteSession(String bookingId) async {
+    final idx = _bookings.indexWhere((b) => b.id == bookingId);
+    if (idx < 0) return false;
+
+    final booking = _bookings[idx];
+    final start = booking.startedAt ?? booking.dateTime;
+    final totalDuration = Duration(hours: booking.durationHours);
+    final elapsed = DateTime.now().difference(start);
+
+    // Verify duration has elapsed (or is within 1 minute of finishing)
+    if (elapsed < totalDuration - const Duration(minutes: 1)) {
+      return false;
+    }
+
+    final now = DateTime.now();
+    await updateBookingStatus(
+      bookingId,
+      BookingStatus.completed,
+      completedAt: now,
+    );
+    return true;
+  }
+
+  /// Check whether the current user has already submitted a review for this booking
+  bool hasReviewedBooking(String bookingId) {
+    if (_currentUser == null) return false;
+    return _reviews.any((r) => r.bookingId == bookingId && r.reviewerId == _currentUser!.id);
+  }
+
+  /// Get all reviews for a specific user
+  List<Review> getReviewsForUser(String userId) {
+    return _reviews.where((r) => r.targetUserId == userId).toList();
+  }
+
+  /// Fetch reviews from Supabase for a specific profile
+  Future<List<Review>> loadReviewsForUser(String userId) async {
+    try {
+      final remoteList = await SupabaseService.instance.fetchReviewsForUser(userId);
+      for (final row in remoteList) {
+        final r = Review.fromJson(row);
+        final existingIdx = _reviews.indexWhere((item) => item.id == r.id);
+        if (existingIdx >= 0) {
+          _reviews[existingIdx] = r;
+        } else {
+          _reviews.insert(0, r);
+        }
+      }
+      notifyListeners();
+      return getReviewsForUser(userId);
+    } catch (e) {
+      debugPrint('[BuddyRepository] Error loading reviews: $e');
+      return getReviewsForUser(userId);
+    }
+  }
+
+  /// Submit a star rating & written review for a completed hangout session
+  Future<bool> submitReview({
+    required String bookingId,
+    required String targetUserId,
+    required int rating,
+    required String comment,
+  }) async {
+    if (_currentUser == null) return false;
+
+    final review = Review(
+      id: 'rev_${DateTime.now().millisecondsSinceEpoch}',
+      bookingId: bookingId,
+      reviewerId: _currentUser!.id,
+      reviewerName: _currentUser!.fullName,
+      reviewerAvatarUrl: _currentUser!.avatarUrl,
+      targetUserId: targetUserId,
+      rating: rating,
+      comment: comment.trim(),
+      createdAt: DateTime.now(),
+    );
+
+    _reviews.insert(0, review);
+    notifyListeners();
+
+    // Persist to Supabase
+    await SupabaseService.instance.submitReview(review.toJson());
+
+    // Send in-app notification to the target user informing them of the new review
+    await NotificationService.instance.send(
+      recipientId: targetUserId,
+      senderId: _currentUser!.id,
+      senderName: _currentUser!.fullName,
+      bookingId: bookingId,
+      title: 'New Review Received! ⭐',
+      message: '${_currentUser!.fullName} left you a $rating-star review: "${comment.trim()}"',
+      type: 'review',
+      currentUserId: _currentUser!.id,
+    );
+
+    return true;
   }
 
   /// Filter buddies based on search query, city, category, max price

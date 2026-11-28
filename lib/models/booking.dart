@@ -65,28 +65,30 @@ class Booking {
   }
 
   factory Booking.fromJson(Map<String, dynamic> json) {
+    final rawStartPin = json['startPin'] as String? ?? json['start_pin'] as String? ?? '';
+
     return Booking(
       id: json['id'] as String,
-      clientId: json['clientId'] as String,
-      clientName: json['clientName'] as String? ?? 'Client',
-      buddyId: json['buddyId'] as String,
-      buddyName: json['buddyName'] as String? ?? 'Buddy',
-      activity: json['activity'] as String,
-      city: json['city'] as String,
-      dateTime: DateTime.parse(json['dateTime'] as String),
-      durationHours: json['durationHours'] as int? ?? 2,
-      hourlyRate: (json['hourlyRate'] as num).toDouble(),
-      totalAmount: (json['totalAmount'] as num).toDouble(),
-      meetingLocation: json['meetingLocation'] as String,
+      clientId: json['clientId'] as String? ?? json['client_id'] as String? ?? '',
+      clientName: json['clientName'] as String? ?? json['client_name'] as String? ?? 'Client',
+      buddyId: json['buddyId'] as String? ?? json['buddy_id'] as String? ?? '',
+      buddyName: json['buddyName'] as String? ?? json['buddy_name'] as String? ?? 'Buddy',
+      activity: json['activity'] as String? ?? 'Hangout',
+      city: json['city'] as String? ?? '',
+      dateTime: DateTime.parse((json['dateTime'] ?? json['date_time']) as String),
+      durationHours: (json['durationHours'] ?? json['duration_hours']) as int? ?? 2,
+      hourlyRate: ((json['hourlyRate'] ?? json['hourly_rate']) as num).toDouble(),
+      totalAmount: ((json['totalAmount'] ?? json['total_amount']) as num).toDouble(),
+      meetingLocation: (json['meetingLocation'] ?? json['meeting_location']) as String? ?? '',
       notes: json['notes'] as String? ?? '',
       status: BookingStatus.values.firstWhere(
         (e) => e.name == json['status'],
         orElse: () => BookingStatus.pending,
       ),
-      startPin: json['startPin'] as String? ?? '',
-      endPin: json['endPin'] as String? ?? '',
-      startedAt: json['startedAt'] != null ? DateTime.tryParse(json['startedAt'] as String) : null,
-      completedAt: json['completedAt'] != null ? DateTime.tryParse(json['completedAt'] as String) : null,
+      startPin: rawStartPin,
+      endPin: (json['endPin'] ?? json['end_pin']) as String? ?? '',
+      startedAt: (json['startedAt'] ?? json['started_at']) != null ? DateTime.tryParse((json['startedAt'] ?? json['started_at']) as String) : null,
+      completedAt: (json['completedAt'] ?? json['completed_at']) != null ? DateTime.tryParse((json['completedAt'] ?? json['completed_at']) as String) : null,
     );
   }
 }

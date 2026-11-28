@@ -12,6 +12,7 @@ class NotificationService extends ChangeNotifier {
   NotificationService._internal();
 
   final List<AppNotification> _notifications = [];
+  final Set<String> _sentNotificationKeys = {};
   GlobalKey<NavigatorState>? navigatorKey;
 
   List<AppNotification> get notifications => List.unmodifiable(_notifications);
@@ -62,7 +63,7 @@ class NotificationService extends ChangeNotifier {
   }
 
   /// Send a notification to a specific recipient (User1 or User2).
-  /// Persists to Supabase, local cache, and displays an on-device Heads-Up Banner.
+  /// Enforces deterministic unique notification keys to guarantee 1 user receives strictly 1 notification per event.
   Future<void> send({
     required String recipientId,
     required String senderId,
@@ -73,8 +74,18 @@ class NotificationService extends ChangeNotifier {
     required String type,
     String? currentUserId,
   }) async {
+    // Unique deterministic key: e.g. "notif_bk_123_meetup_started_user1"
+    final deterministicId = 'notif_${bookingId}_${type}_$recipientId';
+
+    // In-memory guard to prevent multiple redundant triggers from hot loops or re-entrant state updates
+    if (_sentNotificationKeys.contains(deterministicId)) {
+      debugPrint('[NotificationService] Prevented duplicate send for key: $deterministicId');
+      return;
+    }
+    _sentNotificationKeys.add(deterministicId);
+
     final notif = AppNotification(
-      id: 'notif_${DateTime.now().millisecondsSinceEpoch}_${(DateTime.now().microsecond % 1000)}',
+      id: deterministicId,
       recipientId: recipientId,
       senderId: senderId,
       senderName: senderName,
@@ -86,15 +97,18 @@ class NotificationService extends ChangeNotifier {
       isRead: false,
     );
 
-    // 1. Persist to Supabase so the recipient receives it across devices
+    // 1. Persist to Supabase with resolution=ignore-duplicates (primary key = deterministicId)
     await SupabaseService.instance.sendNotification(notif.toJson());
 
     // 2. If the current logged in user on this phone is the recipient, save to local inbox & trigger phone banner
     if (currentUserId != null && currentUserId == recipientId) {
-      _notifications.insert(0, notif);
-      await _saveLocally(currentUserId);
-      notifyListeners();
-      showHeadsUpNotification(notif);
+      final existingIdx = _notifications.indexWhere((n) => n.id == deterministicId);
+      if (existingIdx < 0) {
+        _notifications.insert(0, notif);
+        await _saveLocally(currentUserId);
+        notifyListeners();
+        showHeadsUpNotification(notif);
+      }
     }
   }
 

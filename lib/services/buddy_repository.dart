@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -208,6 +209,8 @@ class BuddyRepository extends ChangeNotifier {
             }
           }
 
+          final rawStartPin = row['start_pin']?.toString() ?? '';
+
           return Booking(
             id: row['id']?.toString() ?? '',
             clientId: row['client_id']?.toString() ?? '',
@@ -226,7 +229,7 @@ class BuddyRepository extends ChangeNotifier {
               (e) => e.name == row['status'],
               orElse: () => BookingStatus.pending,
             ),
-            startPin: row['start_pin']?.toString() ?? '',
+            startPin: rawStartPin,
             startedAt: parsedStartedAt,
             endPin: row['end_pin']?.toString() ?? '',
             completedAt: parsedCompletedAt,
@@ -471,8 +474,8 @@ class BuddyRepository extends ChangeNotifier {
     await Future.delayed(const Duration(milliseconds: 500));
 
     final total = buddy.hourlyRate * durationHours;
-    // Generate a secure 4-digit mutual start PIN
-    final randomPin = (1000 + (DateTime.now().microsecondsSinceEpoch % 9000)).toString();
+    // Generate a cryptographically secure 4-digit random start PIN (1000 - 9999)
+    final randomPin = (1000 + Random.secure().nextInt(9000)).toString();
 
     final booking = Booking(
       id: 'bk_${DateTime.now().millisecondsSinceEpoch}',
@@ -544,6 +547,8 @@ class BuddyRepository extends ChangeNotifier {
     final idx = _bookings.indexWhere((b) => b.id == bookingId);
     if (idx >= 0) {
       final old = _bookings[idx];
+      final isStatusTransition = old.status != newStatus;
+
       final updated = Booking(
         id: old.id,
         clientId: old.clientId,
@@ -575,7 +580,11 @@ class BuddyRepository extends ChangeNotifier {
       );
       notifyListeners();
 
-      // Dispatch Scenario Notifications based on status transitions
+      // Dispatch Scenario Notifications ONLY when a genuine status transition occurs
+      if (!isStatusTransition) {
+        return;
+      }
+
       final currentUid = _currentUser?.id;
 
       // Scenario 2: User1 receives notification when User2 accepts or declines
@@ -730,17 +739,40 @@ class BuddyRepository extends ChangeNotifier {
   /// Verify 4-digit start PIN and begin in-progress meetup session.
   /// Dynamically generates the 4-digit End PIN only upon successful start.
   Future<bool> verifyAndStartMeetup(String bookingId, String enteredPin) async {
-    final idx = _bookings.indexWhere((b) => b.id == bookingId);
+    // 1. First attempt to check local booking
+    var idx = _bookings.indexWhere((b) => b.id == bookingId);
+    
+    // 2. If startPin is empty or booking not found, fetch latest directly from Supabase
+    if (idx < 0 || _bookings[idx].startPin.isEmpty) {
+      await loadRemoteBookings();
+      idx = _bookings.indexWhere((b) => b.id == bookingId);
+    }
+
     if (idx < 0) return false;
 
-    final booking = _bookings[idx];
-    if (booking.startPin.trim() != enteredPin.trim()) {
-      return false;
+    var booking = _bookings[idx];
+    final cleanEntered = enteredPin.trim();
+    final cleanStartPin = booking.startPin.trim();
+
+    // Verify PIN match
+    if (cleanStartPin.isNotEmpty && cleanStartPin != cleanEntered) {
+      // Re-fetch once more in case client just generated/updated the booking on another device
+      await loadRemoteBookings();
+      final freshIdx = _bookings.indexWhere((b) => b.id == bookingId);
+      if (freshIdx >= 0) {
+        booking = _bookings[freshIdx];
+        final freshPin = booking.startPin.trim();
+        if (freshPin != cleanEntered) {
+          return false;
+        }
+      } else {
+        return false;
+      }
     }
 
     final now = DateTime.now();
-    // Generate End PIN dynamically now that the session is officially starting
-    final dynamicEndPin = (1000 + (DateTime.now().microsecondsSinceEpoch % 9000)).toString();
+    // Generate End PIN dynamically using secure random (1000 - 9999) now that session starts
+    final dynamicEndPin = (1000 + Random.secure().nextInt(9000)).toString();
 
     await updateBookingStatus(
       bookingId,

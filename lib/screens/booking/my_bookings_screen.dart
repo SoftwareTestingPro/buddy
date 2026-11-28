@@ -330,16 +330,21 @@ class MyBookingsScreen extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: b.status == BookingStatus.confirmed
-                              ? AppTheme.success.withOpacity(0.12)
-                              : (b.status == BookingStatus.inProgress
-                                  ? const Color(0xFF6366F1).withOpacity(0.12)
-                                  : (b.status == BookingStatus.disputed
-                                      ? Colors.orange.withOpacity(0.15)
-                                      : (b.status == BookingStatus.pending
-                                          ? AppTheme.warning.withOpacity(0.12)
-                                          : Colors.red.withOpacity(0.12)))),
+                          color: b.status == BookingStatus.completed
+                              ? const Color(0xFFDCFCE7) // Rich clear green background
+                              : (b.status == BookingStatus.confirmed
+                                  ? const Color(0xFFE0F2FE) // Clear soft blue for confirmed
+                                  : (b.status == BookingStatus.inProgress
+                                      ? const Color(0xFF6366F1).withOpacity(0.12)
+                                      : (b.status == BookingStatus.disputed
+                                          ? Colors.orange.withOpacity(0.15)
+                                          : (b.status == BookingStatus.pending
+                                              ? AppTheme.warning.withOpacity(0.12)
+                                              : Colors.red.withOpacity(0.12))))),
                           borderRadius: BorderRadius.circular(12),
+                          border: b.status == BookingStatus.completed
+                              ? Border.all(color: const Color(0xFF86EFAC), width: 1)
+                              : null,
                         ),
                         child: Text(
                           b.status == BookingStatus.inProgress
@@ -348,15 +353,17 @@ class MyBookingsScreen extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: b.status == BookingStatus.confirmed
-                                ? AppTheme.success
-                                : (b.status == BookingStatus.inProgress
-                                    ? const Color(0xFF4F46E5)
-                                    : (b.status == BookingStatus.disputed
-                                        ? Colors.orange.shade900
-                                        : (b.status == BookingStatus.pending
-                                            ? AppTheme.warning
-                                            : Colors.red.shade700))),
+                            color: b.status == BookingStatus.completed
+                                ? const Color(0xFF15803D) // Dark green text on green background
+                                : (b.status == BookingStatus.confirmed
+                                    ? const Color(0xFF0369A1)
+                                    : (b.status == BookingStatus.inProgress
+                                        ? const Color(0xFF4F46E5)
+                                        : (b.status == BookingStatus.disputed
+                                            ? Colors.orange.shade900
+                                            : (b.status == BookingStatus.pending
+                                                ? AppTheme.warning
+                                                : Colors.red.shade700)))),
                           ),
                         ),
                       ),
@@ -531,7 +538,7 @@ class MyBookingsScreen extends StatelessWidget {
                               border: Border.all(color: const Color(0xFF86EFAC), width: 1.5),
                             ),
                             child: Text(
-                              b.startPin.isNotEmpty ? b.startPin : '7429',
+                              b.startPin.trim().isNotEmpty ? b.startPin.trim() : '••••',
                               style: const TextStyle(
                                 fontFamily: 'monospace',
                                 fontWeight: FontWeight.w900,
